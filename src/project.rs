@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf, fs};
 use walkdir::WalkDir;
-use crate::scanner::Scanner;
+use crate::{parser::Parser, scanner::Scanner};
 
 pub struct Project {
     pub path: PathBuf,
@@ -42,8 +42,10 @@ impl Project {
 
     pub fn compile(&mut self) {
         for (path, content) in &self.files {
-            let mut scanner = Scanner::new(content.clone());
-            scanner.scan_tokens();
+            let mut scanner = Scanner::new(path.to_string_lossy().to_string(), content.clone());
+            let tokens = scanner.scan_tokens();
+            let mut parser = Parser::new(path.to_string_lossy().to_string(), tokens);
+            parser.parse();
         }
     }
 }

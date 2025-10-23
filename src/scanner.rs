@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use crate::error::ErrorReporter;
 
 
@@ -10,23 +12,25 @@ const KEYWORDS: [(&str, TokenType); 16] = [
 ];
 
 pub struct Scanner {
+    file_path: String,
     source: String,
     tokens: Vec<Token>,
     start: usize,
     current: usize,
-    had_error: bool,
-    errors: Vec<(usize, usize, String)>
+    had_error: RefCell<bool>,
+    errors: RefCell<Vec<(usize, usize, String)>>
 }
 
+#[derive(Clone)]
 pub struct Token {
-    text: String,
-    start: usize,
-    end: usize,
-    token_type: TokenType,
-    literal: Option<String>
+    pub text: String,
+    pub start: usize,
+    pub end: usize,
+    pub token_type: TokenType,
+    pub literal: Option<Literal>
 }
 
-#[derive(Debug)]
+#[derive(PartialEq, Clone)]
 pub enum TokenType {
     LeftParen, RightParen,
     LeftSuqareBracket, RightSquareBracket,
@@ -40,25 +44,36 @@ pub enum TokenType {
     And, Or, True, False, If, Else, For, While,
     Print, Return, Super, This,
     Var, Class, Fun, Nil,
+    Eof
+}
+
+#[derive(Clone)]
+pub enum Literal {
+    Bool(bool),
+    String(String),
+    Number(String)
 }
 
 impl Scanner {
-    pub fn new(source: String) -> Self {
+    pub fn new(file_path: String, source: String) -> Self {
         Self {
+            file_path: file_path,
             source: source,
             tokens: Vec::new(),
             start: 0,
             current: 0,
-            had_error: false,
-            errors: Vec::new()
+            had_error: RefCell::new(false),
+            errors: RefCell::new(Vec::new())
         }
     }
 
-    pub fn scan_tokens(&mut self) {
+    pub fn scan_tokens(&mut self) -> Vec<Token> {
         while !self.is_end() {
             self.start = self.current;
             self.scan_token();
         }
+        self.add_token(TokenType::Eof, None);
+        self.tokens.clone()
     }
 
     fn scan_token(&mut self) {
@@ -152,7 +167,7 @@ impl Scanner {
         // close "
         self.next_char();
         let value = self.source.get(self.start+1..self.current-1);
-        self.add_token(TokenType::String, value.map(|v|v.to_string()));
+        self.add_token(TokenType::String, value.map(|v|Literal::String(v.to_string())));
     }
 
     fn scan_number(&mut self) {
@@ -167,7 +182,7 @@ impl Scanner {
             }
         }
 
-        self.add_token(TokenType::Number, self.source.get(self.start..self.current).map(|v|v.to_string()));
+        self.add_token(TokenType::Number, self.source.get(self.start..self.current).map(|v|Literal::Number(v.to_string())));
     }
 
     fn scan_identifier(&mut self) {
@@ -208,9 +223,8 @@ impl Scanner {
         c.unwrap()
     }
 
-    fn add_token(&mut self, token_type: TokenType, literal: Option<String>) {
+    fn add_token(&mut self, token_type: TokenType, literal: Option<Literal>) {
         let text = self.source.get(self.start..self.current);
-        println!("{}", text.unwrap());
         self.tokens.push(Token { text: text.unwrap().to_string(), start: self.start, end: self.current-1, token_type: token_type, literal: literal });
     }
 
@@ -231,9 +245,9 @@ impl Scanner {
 }
 
 impl ErrorReporter for Scanner {
-    fn error(&mut self, start: usize, end: usize, error_content: String) {
-        self.had_error = true;
-        println!("{} {} {}", start, end, error_content);
-        self.errors.push((start, end, error_content));
+    fn error(&self, start: usize, end: usize, error_content: String) {
+        *self.had_error.borrow_mut() = true;
+        println!("Scanner error: {} {} {} {}", self.file_path, start, end, error_content);
+        self.errors.borrow_mut().push((start, end, error_content));
     }
 }
