@@ -1,4 +1,4 @@
-use crate::scanner::{Literal, Token};
+use crate::token::{Literal, Token};
 
 pub enum Expr {
     Binary(BinaryExpr),
@@ -8,8 +8,7 @@ pub enum Expr {
     Grouping(GroupingExpr),
     Identifier(Identifier),
     Assign(AssignExpr),
-    Call(CallExpr),
-    Unknown
+    Call(CallExpr)
 }
 
 pub struct BinaryExpr {

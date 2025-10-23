@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use crate::error::ErrorReporter;
-use crate::scanner::{Literal, Token, TokenType};
+use crate::token::{Literal, Token, TokenType};
 use crate::ast::expr::*;
 use crate::ast::stmt::*;
 

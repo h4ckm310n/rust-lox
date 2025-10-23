@@ -1,15 +1,6 @@
 use std::cell::RefCell;
-
 use crate::error::ErrorReporter;
-
-
-const KEYWORDS: [(&str, TokenType); 16] = [
-   ("and", TokenType::And), ("or", TokenType::Or),
-   ("true", TokenType::True), ("false", TokenType::False),
-   ("if", TokenType::If), ("else", TokenType::Else), ("for", TokenType::For), ("while", TokenType::While),
-   ("print", TokenType::Print), ("return", TokenType::Return), ("super", TokenType::Super), ("this", TokenType::This),
-   ("var", TokenType::Var), ("class", TokenType::Class), ("fun", TokenType::Fun), ("nil", TokenType::Nil)
-];
+use crate::token::*;
 
 pub struct Scanner {
     file_path: String,
@@ -19,39 +10,6 @@ pub struct Scanner {
     current: usize,
     had_error: RefCell<bool>,
     errors: RefCell<Vec<(usize, usize, String)>>
-}
-
-#[derive(Clone)]
-pub struct Token {
-    pub text: String,
-    pub start: usize,
-    pub end: usize,
-    pub token_type: TokenType,
-    pub literal: Option<Literal>
-}
-
-#[derive(PartialEq, Clone)]
-pub enum TokenType {
-    LeftParen, RightParen,
-    LeftSuqareBracket, RightSquareBracket,
-    LeftBrace, RightBrace,
-    Comma, Dot, Minus, Plus, Semicolon, Slash, Star,
-    Bang, BangEqual,
-    Equal, EqualEqual,
-    Greater, GreaterEqual,
-    Less, LessEqual,
-    Identifier, String, Number,
-    And, Or, True, False, If, Else, For, While,
-    Print, Return, Super, This,
-    Var, Class, Fun, Nil,
-    Eof
-}
-
-#[derive(Clone)]
-pub enum Literal {
-    Bool(bool),
-    String(String),
-    Number(String)
 }
 
 impl Scanner {

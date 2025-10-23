@@ -1,4 +1,4 @@
-use crate::{ast::expr::Expr, scanner::Token};
+use crate::{ast::expr::Expr, token::Token};
 
 pub enum Stmt {
     Expr(ExprStmt),
