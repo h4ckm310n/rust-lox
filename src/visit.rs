@@ -37,6 +37,10 @@ pub trait Visitor {
         visit_fun_decl(self, fun_decl);
     }
 
+    fn visit_class_decl(&mut self, class_decl: &ClassDecl) {
+        visit_class_decl(self, class_decl);
+    }
+
     fn visit_expr(&mut self, expr: &Expr) {
         visit_expr(self, expr);
     }
@@ -72,6 +76,18 @@ pub trait Visitor {
     fn visit_call_expr(&mut self, call_expr: &CallExpr) {
         visit_call_expr(self, call_expr);
     }
+
+    fn visit_get_expr(&mut self, get_expr: &GetExpr) {
+        visit_get_expr(self, get_expr);
+    }
+
+    fn visit_set_expr(&mut self, set_expr: &SetExpr) {
+        visit_set_expr(self, set_expr);
+    }
+
+    fn visit_this(&mut self, this: &This) {
+        visit_this(self, this);
+    }
 }
 
 pub fn visit_stmt<V: Visitor + ?Sized>(v: &mut V, stmt: &Stmt) {
@@ -84,6 +100,7 @@ pub fn visit_stmt<V: Visitor + ?Sized>(v: &mut V, stmt: &Stmt) {
         Stmt::Block(block) => v.visit_block(block),
         Stmt::VarDecl(var_decl) => v.visit_var_decl(var_decl),
         Stmt::FunDecl(fun_decl) => v.visit_fun_decl(fun_decl),
+        Stmt::ClassDecl(class_decl) => v.visit_class_decl(class_decl),
     }
 }
 
@@ -130,6 +147,12 @@ pub fn visit_fun_decl<V: Visitor + ?Sized>(v: &mut V, fun_decl: &FunDecl) {
     v.visit_stmt(&*fun_decl.body);
 }
 
+pub fn visit_class_decl<V: Visitor + ?Sized>(v: &mut V, class_decl: &ClassDecl) {
+    for method in &class_decl.methods {
+        v.visit_fun_decl(method);
+    }
+}
+
 pub fn visit_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
     match expr {
         Expr::Binary(binary_expr) => v.visit_binary_expr(binary_expr),
@@ -139,7 +162,10 @@ pub fn visit_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
         Expr::Grouping(grouping_expr) => v.visit_grouping_expr(grouping_expr),
         Expr::Identifier(identifier) => v.visit_identifier(identifier),
         Expr::Assign(assign_expr) => v.visit_assign_expr(assign_expr),
-        Expr::Call(call_expr) => v.visit_call_expr(call_expr)
+        Expr::Call(call_expr) => v.visit_call_expr(call_expr),
+        Expr::Get(get_expr) => v.visit_get_expr(get_expr),
+        Expr::Set(set_expr) => v.visit_set_expr(set_expr),
+        Expr::This(this) => v.visit_this(this),
     }
 }
 
@@ -178,4 +204,17 @@ pub fn visit_call_expr<V: Visitor + ?Sized>(v: &mut V, call_expr: &CallExpr) {
     for arg in &call_expr.args {
         v.visit_expr(arg);
     }
+}
+
+pub fn visit_get_expr<V: Visitor + ?Sized>(v: &mut V, get_expr: &GetExpr) {
+    v.visit_expr(&*get_expr.object);
+}
+
+pub fn visit_set_expr<V: Visitor + ?Sized>(v: &mut V, set_expr: &SetExpr) {
+    v.visit_expr(&*set_expr.object);
+    v.visit_expr(&*set_expr.value);
+}
+
+pub fn visit_this<V: Visitor + ?Sized>(v: &mut V, this: &This) {
+
 }

@@ -9,7 +9,10 @@ pub enum Expr {
     Grouping(GroupingExpr),
     Identifier(Identifier),
     Assign(AssignExpr),
-    Call(CallExpr)
+    Call(CallExpr),
+    Get(GetExpr),
+    Set(SetExpr),
+    This(This)
 }
 
 #[derive(Clone, Eq, Hash, PartialEq)]
@@ -58,4 +61,22 @@ pub struct CallExpr {
     pub name: Box<Expr>,
     pub args: Vec<Expr>,
     pub paren: Token
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct GetExpr {
+    pub object: Box<Expr>,
+    pub name: Token
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct SetExpr {
+    pub object: Box<Expr>,
+    pub name: Token,
+    pub value: Box<Expr>
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct This {
+    pub keyword: Token
 }

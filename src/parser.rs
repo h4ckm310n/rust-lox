@@ -54,6 +54,15 @@ impl Parser {
                     }
                 ));
             }
+            else if let Expr::Get(expr_get) = expr {
+                return Ok(Expr::Set(
+                    SetExpr {
+                        object: expr_get.object,
+                        name: expr_get.name,
+                        value: Box::new(value)
+                    }
+                ));
+            }
             return Err(self.handle_error(equals, "Invalid assignment target.".to_string()));
         }
         Ok(expr)
@@ -174,6 +183,14 @@ impl Parser {
         loop {
             if self.is_match(vec![TokenType::LeftParen]) {
                 expr = self.finish_call(expr)?;
+            } else if self.is_match(vec![TokenType::Dot]) {
+                let name = self.consume(TokenType::Identifier, "Expect property name after '.'.".to_string())?;
+                expr = Expr::Get(
+                    GetExpr { 
+                        object: Box::new(expr), 
+                        name: name.clone() 
+                    }
+                )
             } else {
                 break;
             }
@@ -201,6 +218,11 @@ impl Parser {
                 LiteralExpr { 
                     content: self.previous().literal.clone().unwrap(),
                 }
+            ));
+        }
+        if self.is_match(vec![TokenType::This]) {
+            return Ok(Expr::This(
+                This { keyword: self.previous().clone() }
             ));
         }
         if self.is_match(vec![TokenType::Identifier]) {
@@ -391,6 +413,11 @@ impl Parser {
                 return Ok(Some(fun_decl));
             }
         }
+        else if self.is_match(vec![TokenType::Class]) {
+            if let Ok(class_decl) = self.parse_class_decl() {
+                return Ok(Some(class_decl));
+            }
+        }
         else if let Ok(stmt) = self.parse_stmt() {
             return Ok(Some(stmt));
         }
@@ -438,6 +465,24 @@ impl Parser {
                 name: identifier.clone(), 
                 params: params, 
                 body: Box::new(body)
+            }
+        ))
+    }
+
+    fn parse_class_decl(&self) -> Result<Stmt, (Token, String)> {
+        let identifier = self.consume(TokenType::Identifier, "Expect class name.".to_string())?;
+        self.consume(TokenType::LeftBrace, "Expect '{' before class body.".to_string())?;
+        let mut methods = Vec::new();
+        while !self.check(TokenType::RightBrace) && !self.is_end() {
+            if let Stmt::FunDecl(fun_decl) = self.parse_fun_decl("method".to_string())? {
+                methods.push(fun_decl);
+            }
+        }
+        self.consume(TokenType::RightBrace, "Expect '}' after class body.".to_string())?;
+        Ok(Stmt::ClassDecl(
+            ClassDecl { 
+                name: identifier.clone(), 
+                methods: methods 
             }
         ))
     }

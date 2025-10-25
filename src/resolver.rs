@@ -26,6 +26,15 @@ impl Visitor for Resolver {
         self.resolve_function(fun_decl);
     }
 
+    fn visit_class_decl(&mut self, class_decl: &ClassDecl) {
+        self.declare(class_decl.name.clone());
+        self.define(class_decl.name.clone());
+        self.begin_scope();
+        self.scope_stack.last_mut().unwrap().insert("this".to_string(), true);
+        visit_class_decl(self, class_decl);
+        self.end_scope();
+    }
+
     fn visit_identifier(&mut self, identifier: &Identifier) {
         if let Some(scope) = self.scope_stack.last()
            && let Some(state) = scope.get(&identifier.name.text) 
@@ -101,6 +110,7 @@ impl Resolver {
             self.define(param.clone());
         }
         visit_fun_decl(self, fun_decl);
+        self.end_scope();
     }
 
     fn resolve_depth(&self, expr: Expr, depth: usize) {

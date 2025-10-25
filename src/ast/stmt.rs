@@ -9,7 +9,8 @@ pub enum Stmt {
     Return(ReturnStmt),
     Block(Block),
     VarDecl(VarDecl),
-    FunDecl(FunDecl)
+    FunDecl(FunDecl),
+    ClassDecl(ClassDecl)
 }
 
 #[derive(Clone, Eq, Hash, PartialEq)]
@@ -57,4 +58,10 @@ pub struct FunDecl {
     pub name: Token,
     pub params: Vec<Token>,
     pub body: Box<Stmt>
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct ClassDecl {
+    pub name: Token,
+    pub methods: Vec<FunDecl>
 }
