@@ -8,7 +8,7 @@ pub struct Parser {
     file_path: String,
     tokens: Vec<Token>,
     current: RefCell<usize>,
-    had_error: RefCell<bool>,
+    pub had_error: RefCell<bool>,
     errors: RefCell<Vec<(usize, usize, String)>>
 }
 
@@ -23,10 +23,14 @@ impl Parser {
         }
     }
 
-    pub fn parse(&self) {
+    pub fn parse(&self) -> Vec<Stmt> {
+        let mut stmts = Vec::new();
         while !self.is_end() {
-            self.parse_decl();
+            if let Ok(stmt) =  self.parse_decl() && let Some(stmt) = stmt {
+                stmts.push(stmt);
+            }
         }
+        stmts
     }
 }
 

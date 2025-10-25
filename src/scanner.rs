@@ -8,7 +8,7 @@ pub struct Scanner {
     tokens: Vec<Token>,
     start: usize,
     current: usize,
-    had_error: RefCell<bool>,
+    pub had_error: RefCell<bool>,
     errors: RefCell<Vec<(usize, usize, String)>>
 }
 

@@ -6,7 +6,7 @@ pub const KEYWORDS: [(&str, TokenType); 16] = [
    ("var", TokenType::Var), ("class", TokenType::Class), ("fun", TokenType::Fun), ("nil", TokenType::Nil)
 ];
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub struct Token {
     pub text: String,
     pub start: usize,
@@ -15,7 +15,7 @@ pub struct Token {
     pub literal: Option<Literal>
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Eq, Hash)]
 pub enum TokenType {
     LeftParen, RightParen,
     LeftSuqareBracket, RightSquareBracket,
@@ -32,7 +32,7 @@ pub enum TokenType {
     Eof
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub enum Literal {
     Bool(bool),
     String(String),
