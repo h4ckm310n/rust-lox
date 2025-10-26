@@ -29,6 +29,10 @@ impl Visitor for Resolver {
     fn visit_class_decl(&mut self, class_decl: &ClassDecl) {
         self.declare(class_decl.name.clone());
         self.define(class_decl.name.clone());
+        if let Some(superclass) = &class_decl.superclass && superclass.name == class_decl.name {
+            self.error(superclass.name.start, superclass.name.end, "A class can't inherit from itself.".to_string());
+            return;
+        }
         self.begin_scope();
         self.scope_stack.last_mut().unwrap().insert("this".to_string(), true);
         visit_class_decl(self, class_decl);
@@ -40,6 +44,7 @@ impl Visitor for Resolver {
            && let Some(state) = scope.get(&identifier.name.text) 
            && *state == false {
             self.error(identifier.name.start, identifier.name.end, "Can't read local variable in its own initializer.".to_string());
+            return;
         }
         self.resolve_local(Expr::Identifier(identifier.clone()), identifier.name.clone());
         visit_identifier(self, identifier);

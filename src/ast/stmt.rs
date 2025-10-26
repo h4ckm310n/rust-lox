@@ -1,4 +1,4 @@
-use crate::{ast::expr::Expr, token::Token};
+use crate::{ast::expr::{Expr, Identifier}, token::Token};
 
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub enum Stmt {
@@ -63,5 +63,6 @@ pub struct FunDecl {
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub struct ClassDecl {
     pub name: Token,
+    pub superclass: Option<Identifier>,
     pub methods: Vec<FunDecl>
 }

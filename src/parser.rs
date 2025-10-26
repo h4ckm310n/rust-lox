@@ -220,6 +220,14 @@ impl Parser {
                 }
             ));
         }
+        if self.is_match(vec![TokenType::Super]) {
+            let keyword = self.previous();
+            self.consume(TokenType::Dot, "Expect '.' after 'super'.".to_string())?;
+            let method = self.consume(TokenType::Identifier, "Expect superclass method name.".to_string())?;
+            return Ok(Expr::Super(
+                Super { keyword: keyword.clone(), method: method.clone() }
+            ));
+        }
         if self.is_match(vec![TokenType::This]) {
             return Ok(Expr::This(
                 This { keyword: self.previous().clone() }
@@ -471,6 +479,13 @@ impl Parser {
 
     fn parse_class_decl(&self) -> Result<Stmt, (Token, String)> {
         let identifier = self.consume(TokenType::Identifier, "Expect class name.".to_string())?;
+        let superclass = if self.is_match(vec![TokenType::Less]) {
+            // extends
+            self.consume(TokenType::Identifier, "Expect super class name.".to_string())?;
+            Some(Identifier { name: self.previous().clone() })
+        } else {
+            None
+        };
         self.consume(TokenType::LeftBrace, "Expect '{' before class body.".to_string())?;
         let mut methods = Vec::new();
         while !self.check(TokenType::RightBrace) && !self.is_end() {
@@ -481,7 +496,8 @@ impl Parser {
         self.consume(TokenType::RightBrace, "Expect '}' after class body.".to_string())?;
         Ok(Stmt::ClassDecl(
             ClassDecl { 
-                name: identifier.clone(), 
+                name: identifier.clone(),
+                superclass: superclass,
                 methods: methods 
             }
         ))

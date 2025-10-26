@@ -12,7 +12,8 @@ pub enum Expr {
     Call(CallExpr),
     Get(GetExpr),
     Set(SetExpr),
-    This(This)
+    This(This),
+    Super(Super)
 }
 
 #[derive(Clone, Eq, Hash, PartialEq)]
@@ -79,4 +80,10 @@ pub struct SetExpr {
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub struct This {
     pub keyword: Token
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct Super {
+    pub keyword: Token,
+    pub method: Token
 }

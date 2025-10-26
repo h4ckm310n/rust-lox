@@ -88,6 +88,10 @@ pub trait Visitor {
     fn visit_this(&mut self, this: &This) {
         visit_this(self, this);
     }
+
+    fn visit_super(&mut self, super_expr: &Super) {
+        visit_super(self, super_expr);
+    }
 }
 
 pub fn visit_stmt<V: Visitor + ?Sized>(v: &mut V, stmt: &Stmt) {
@@ -148,6 +152,9 @@ pub fn visit_fun_decl<V: Visitor + ?Sized>(v: &mut V, fun_decl: &FunDecl) {
 }
 
 pub fn visit_class_decl<V: Visitor + ?Sized>(v: &mut V, class_decl: &ClassDecl) {
+    if let Some(superclass) = &class_decl.superclass {
+        v.visit_identifier(superclass);
+    }
     for method in &class_decl.methods {
         v.visit_fun_decl(method);
     }
@@ -166,6 +173,7 @@ pub fn visit_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
         Expr::Get(get_expr) => v.visit_get_expr(get_expr),
         Expr::Set(set_expr) => v.visit_set_expr(set_expr),
         Expr::This(this) => v.visit_this(this),
+        Expr::Super(super_expr) => v.visit_super(super_expr)
     }
 }
 
@@ -216,5 +224,9 @@ pub fn visit_set_expr<V: Visitor + ?Sized>(v: &mut V, set_expr: &SetExpr) {
 }
 
 pub fn visit_this<V: Visitor + ?Sized>(v: &mut V, this: &This) {
+
+}
+
+pub fn visit_super<V: Visitor + ?Sized>(v: &mut V, super_expr: &Super) {
 
 }
