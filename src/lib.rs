@@ -6,3 +6,5 @@ pub mod error;
 pub mod ast;
 pub mod visit;
 pub mod resolver;
+pub mod interpreter;
+pub mod environment;

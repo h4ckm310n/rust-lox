@@ -36,5 +36,6 @@ pub enum TokenType {
 pub enum Literal {
     Bool(bool),
     String(String),
-    Number(String)
+    Number(String),
+    Nil
 }

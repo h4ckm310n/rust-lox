@@ -213,6 +213,13 @@ impl Parser {
                 }
             ));
         }
+        if self.is_match(vec![TokenType::Nil]) {
+            return Ok(Expr::Literal(
+                LiteralExpr { 
+                    content: Literal::Nil 
+                }
+            ))
+        }
         if self.is_match(vec![TokenType::String, TokenType::Number]) {
             return Ok(Expr::Literal(
                 LiteralExpr { 
