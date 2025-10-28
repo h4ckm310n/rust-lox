@@ -8,51 +8,59 @@ pub struct Resolver {
 }
 
 impl Visitor for Resolver {
-    fn visit_block(&mut self, block: &Block) {
+    type R = i8;
+    
+    fn visit_block(&mut self, block: &Block) -> Result<Option<Self::R>, (Token, String)> {
         self.begin_scope();
-        visit_block(self, block);
+        self.default_visit_block(block)?;
         self.end_scope();
+        Ok(None)
     }
 
-    fn visit_var_decl(&mut self, var_decl: &VarDecl) {
+    fn visit_var_decl(&mut self, var_decl: &VarDecl) -> Result<Option<Self::R>, (Token, String)> {
         self.declare(var_decl.name.clone());
-        visit_var_decl(self, var_decl);
+        self.default_visit_var_decl(var_decl)?;
         self.define(var_decl.name.clone());
+        Ok(None)
     }
 
-    fn visit_fun_decl(&mut self, fun_decl: &FunDecl) {
+    fn visit_fun_decl(&mut self, fun_decl: &FunDecl) -> Result<Option<Self::R>, (Token, String)> {
         self.declare(fun_decl.name.clone());
         self.define(fun_decl.name.clone());
         self.resolve_function(fun_decl);
+        Ok(None)
     }
 
-    fn visit_class_decl(&mut self, class_decl: &ClassDecl) {
+    fn visit_class_decl(&mut self, class_decl: &ClassDecl) -> Result<Option<Self::R>, (Token, String)> {
         self.declare(class_decl.name.clone());
         self.define(class_decl.name.clone());
         if let Some(superclass) = &class_decl.superclass && superclass.name == class_decl.name {
             self.error(superclass.name.start, superclass.name.end, "A class can't inherit from itself.".to_string());
-            return;
+            return Err((superclass.name.clone(), "".to_string()));
         }
         self.begin_scope();
         self.scope_stack.last_mut().unwrap().insert("this".to_string(), true);
-        visit_class_decl(self, class_decl);
+        self.default_visit_class_decl(class_decl)?;
         self.end_scope();
+        Ok(None)
     }
 
-    fn visit_identifier(&mut self, identifier: &Identifier) {
+    fn visit_identifier(&mut self, identifier: &Identifier) -> Result<Option<Self::R>, (Token, String)> {
         if let Some(scope) = self.scope_stack.last()
            && let Some(state) = scope.get(&identifier.name.text) 
            && *state == false {
             self.error(identifier.name.start, identifier.name.end, "Can't read local variable in its own initializer.".to_string());
-            return;
+            return Err((identifier.name.clone(), "".to_string()));
         }
         self.resolve_local(Expr::Identifier(identifier.clone()), identifier.name.clone());
-        visit_identifier(self, identifier);
+        self.default_visit_identifier(identifier)?;
+        Ok(None)
     }
 
-    fn visit_assign_expr(&mut self, assign_expr: &AssignExpr) {
-        visit_assign_expr(self, assign_expr);
+    fn visit_assign_expr(&mut self, assign_expr: &AssignExpr) -> Result<Option<Self::R>, (Token, String)> {
+        self.default_visit_assign_expr(assign_expr)?;
         self.resolve_local(Expr::Assign(assign_expr.clone()), assign_expr.name.clone());
+        Ok(None)
     }
 }
 
@@ -114,7 +122,7 @@ impl Resolver {
             self.declare(param.clone());
             self.define(param.clone());
         }
-        visit_fun_decl(self, fun_decl);
+        self.default_visit_fun_decl(fun_decl);
         self.end_scope();
     }
 

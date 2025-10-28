@@ -39,3 +39,29 @@ pub enum Literal {
     Number(String),
     Nil
 }
+
+impl Literal {
+    pub fn to_bool(&self) -> Option<bool> {
+        if let Self::Bool(value) = self {
+            Some(*value)
+        } else {
+            None
+        }
+    }
+
+    pub fn to_string(&self) -> Option<String> {
+        if let Self::String(value) = self {
+            Some(value.clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn to_number(&self) -> Option<f64> {
+        if let Self::Number(value) = self && let Ok(value) = value.parse::<f64>() {
+            Some(value)
+        } else {
+            None
+        }
+    }
+}
