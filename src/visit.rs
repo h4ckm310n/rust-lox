@@ -136,7 +136,7 @@ pub trait Visitor {
 
     fn default_visit_return_stmt(&mut self, return_stmt: &ReturnStmt) -> Result<Option<Self::R>, (Token, String)> {
         if let Some(value) = &return_stmt.value {
-            self.visit_expr(value)?;
+            return self.visit_expr(value);
         }
         Ok(None)
     }
@@ -150,7 +150,7 @@ pub trait Visitor {
 
     fn default_visit_var_decl(&mut self, var_decl: &VarDecl) -> Result<Option<Self::R>, (Token, String)> {
         if let Some(initializer) = &var_decl.initializer {
-            self.visit_expr(initializer)?;
+            return self.visit_expr(initializer);
         }
         Ok(None)
     }
