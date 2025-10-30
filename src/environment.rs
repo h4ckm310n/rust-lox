@@ -5,6 +5,7 @@ use std::rc::Rc;
 use crate::interpreter::Value;
 use crate::token::Token;
 
+#[derive(PartialEq)]
 pub struct Environment {
     enclosing: Option<Rc<RefCell<Environment>>>,
     values: HashMap<String, Value>

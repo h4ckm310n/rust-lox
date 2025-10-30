@@ -9,29 +9,30 @@ pub struct Resolver {
 
 impl Visitor for Resolver {
     type R = i8;
+    type E = (Token, String);
     
-    fn visit_block(&mut self, block: &Block) -> Result<Option<Self::R>, (Token, String)> {
+    fn visit_block(&mut self, block: &Block) -> Result<Option<Self::R>, Self::E> {
         self.begin_scope();
         self.default_visit_block(block)?;
         self.end_scope();
         Ok(None)
     }
 
-    fn visit_var_decl(&mut self, var_decl: &VarDecl) -> Result<Option<Self::R>, (Token, String)> {
+    fn visit_var_decl(&mut self, var_decl: &VarDecl) -> Result<Option<Self::R>, Self::E> {
         self.declare(var_decl.name.clone());
         self.default_visit_var_decl(var_decl)?;
         self.define(var_decl.name.clone());
         Ok(None)
     }
 
-    fn visit_fun_decl(&mut self, fun_decl: &FunDecl) -> Result<Option<Self::R>, (Token, String)> {
+    fn visit_fun_decl(&mut self, fun_decl: &FunDecl) -> Result<Option<Self::R>, Self::E> {
         self.declare(fun_decl.name.clone());
         self.define(fun_decl.name.clone());
         self.resolve_function(fun_decl);
         Ok(None)
     }
 
-    fn visit_class_decl(&mut self, class_decl: &ClassDecl) -> Result<Option<Self::R>, (Token, String)> {
+    fn visit_class_decl(&mut self, class_decl: &ClassDecl) -> Result<Option<Self::R>, Self::E> {
         self.declare(class_decl.name.clone());
         self.define(class_decl.name.clone());
         if let Some(superclass) = &class_decl.superclass && superclass.name == class_decl.name {
@@ -45,7 +46,7 @@ impl Visitor for Resolver {
         Ok(None)
     }
 
-    fn visit_identifier(&mut self, identifier: &Identifier) -> Result<Option<Self::R>, (Token, String)> {
+    fn visit_identifier(&mut self, identifier: &Identifier) -> Result<Option<Self::R>, Self::E> {
         if let Some(scope) = self.scope_stack.last()
            && let Some(state) = scope.get(&identifier.name.text) 
            && *state == false {
@@ -57,7 +58,7 @@ impl Visitor for Resolver {
         Ok(None)
     }
 
-    fn visit_assign_expr(&mut self, assign_expr: &AssignExpr) -> Result<Option<Self::R>, (Token, String)> {
+    fn visit_assign_expr(&mut self, assign_expr: &AssignExpr) -> Result<Option<Self::R>, Self::E> {
         self.default_visit_assign_expr(assign_expr)?;
         self.resolve_local(Expr::Assign(assign_expr.clone()), assign_expr.name.clone());
         Ok(None)

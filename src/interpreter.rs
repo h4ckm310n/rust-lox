@@ -1,4 +1,6 @@
 use crate::environment::Environment;
+use crate::function::Function;
+use crate::callable::Callable;
 use crate::token::{Literal, Token, TokenType};
 use crate::visit::*;
 use crate::ast::{expr::*, stmt::*};
@@ -6,21 +8,23 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 pub struct Interpreter {
+    pub globals: Rc<RefCell<Environment>>,
     environment: Rc<RefCell<Environment>>
 }
 
 impl Visitor for Interpreter {
     type R = Value;
+    type E = ErrType;
 
-    fn visit_literal_expr(&mut self, literal_expr: &LiteralExpr) -> Result<Option<Self::R>, (Token, String)> {
+    fn visit_literal_expr(&mut self, literal_expr: &LiteralExpr) -> Result<Option<Self::R>, Self::E> {
         Ok(Some(Value::literal_to_value(&literal_expr.content)))
     }
 
-    fn visit_unary_expr(&mut self, unary_expr: &UnaryExpr) -> Result<Option<Self::R>, (Token, String)> {
+    fn visit_unary_expr(&mut self, unary_expr: &UnaryExpr) -> Result<Option<Self::R>, Self::E> {
         let value = if let Some(value) = self.visit_expr(&*unary_expr.expr)? {
             value
         } else {
-            return Err((unary_expr.op.clone(), "".to_string()));
+            return Err(ErrType::Err(unary_expr.op.clone(), "".to_string()));
         };
 
         match unary_expr.op.token_type {
@@ -36,11 +40,11 @@ impl Visitor for Interpreter {
         Ok(None)
     }
 
-    fn visit_binary_expr(&mut self, binary_expr: &BinaryExpr) -> Result<Option<Self::R>, (Token, String)> {
+    fn visit_binary_expr(&mut self, binary_expr: &BinaryExpr) -> Result<Option<Self::R>, Self::E> {
         let _lhs = self.visit_expr(&*binary_expr.lhs)?;
         let _rhs = self.visit_expr(&*binary_expr.rhs)?;
         if _lhs.is_none() || _rhs.is_none() {
-            return Err((binary_expr.op.clone(), "".to_string()));
+            return Err(ErrType::Err(binary_expr.op.clone(), "".to_string()));
         }
         let (lhs, rhs) = (_lhs.as_ref().unwrap(), _rhs.as_ref().unwrap());
         
@@ -68,7 +72,7 @@ impl Visitor for Interpreter {
                     let result = lhs + &rhs;
                     return Ok(Some(Value::String(result)));
                 } else {
-                    return Err((binary_expr.op.clone(), "Operands must be two numbers or two strings.".to_string()));
+                    return Err(ErrType::Err(binary_expr.op.clone(), "Operands must be two numbers or two strings.".to_string()));
                 }
             },
 
@@ -106,7 +110,7 @@ impl Visitor for Interpreter {
         Ok(None)
     }
     
-    fn visit_assign_expr(&mut self, assign_expr: &AssignExpr) -> Result<Option<Self::R>, (Token, String)> {
+    fn visit_assign_expr(&mut self, assign_expr: &AssignExpr) -> Result<Option<Self::R>, Self::E> {
         let value = {
             if let Some(value) = self.visit_expr(&assign_expr.value)? {
                 value
@@ -114,11 +118,13 @@ impl Visitor for Interpreter {
                 Value::Nil
             }
         };
-        self.environment.borrow_mut().assign(&assign_expr.name, value.to_owned())?;
+        if let Err((token, message)) = self.environment.borrow_mut().assign(&assign_expr.name, value.to_owned()) {
+            return Err(ErrType::Err(token, message));
+        };
         Ok(Some(value))
     }
 
-    fn visit_logical_expr(&mut self, logical_expr: &LogicalExpr) -> Result<Option<Self::R>, (Token, String)> {
+    fn visit_logical_expr(&mut self, logical_expr: &LogicalExpr) -> Result<Option<Self::R>, Self::E> {
         let left = self.visit_expr(&logical_expr.lhs)?;
         if let Some(left) = left {
             if logical_expr.operator.token_type == TokenType::Or {
@@ -134,11 +140,36 @@ impl Visitor for Interpreter {
         self.visit_expr(&logical_expr.rhs)
     }
 
-    fn visit_identifier(&mut self, identifier: &Identifier) -> Result<Option<Self::R>, (Token, String)> {
-        Ok(Some(self.environment.borrow().get(&identifier.name)?))
+    fn visit_call_expr(&mut self, call_expr: &CallExpr) -> Result<Option<Self::R>, Self::E> {
+        let callee = self.visit_expr(&call_expr.name)?;
+        let function = if callee.is_some() && let Value::Function(function) = callee.unwrap() {
+            function
+        } else {
+            return Err(ErrType::Err(call_expr.paren.clone(), "Can only call functions and classes.".to_string()));
+        };
+        if call_expr.args.len() != function.borrow().arity() {
+            return Err(ErrType::Err(call_expr.paren.clone(), format!("Expected {} arguments but got {}.", call_expr.args.len(), function.borrow().arity())));
+        }
+        let mut arguments = Vec::new();
+        for argument in &call_expr.args {
+            arguments.push(self.visit_expr(argument)?.unwrap());
+        }
+        Ok(Some(function.borrow().call(self, arguments)))
     }
 
-    fn visit_var_decl(&mut self, var_decl: &VarDecl) -> Result<Option<Self::R>, (Token, String)> {
+    fn visit_identifier(&mut self, identifier: &Identifier) -> Result<Option<Self::R>, Self::E> {
+        let variable = self.environment.borrow().get(&identifier.name);
+        if let Err((token, message)) = variable {
+            Err(ErrType::Err(token, message))
+        } else if let Ok(variable) = variable {
+            Ok(Some(variable))
+        } else {
+            // unreachable
+            Ok(None)
+        }
+    }
+
+    fn visit_var_decl(&mut self, var_decl: &VarDecl) -> Result<Option<Self::R>, Self::E> {
         let value = {
             if let Some(initializer) = &var_decl.initializer &&
                let Some(value) = self.visit_expr(initializer)?
@@ -152,13 +183,21 @@ impl Visitor for Interpreter {
         Ok(None)
     }
 
-    fn visit_block(&mut self, block: &Block) -> Result<Option<Self::R>, (Token, String)> {
+    fn visit_fun_decl(&mut self, fun_decl: &FunDecl) -> Result<Option<Self::R>, Self::E> {
+        let function = Function::new(fun_decl.clone(), self.environment.clone());
+        self.environment.borrow_mut().define(
+            fun_decl.name.text.clone(), 
+            Value::Function(Rc::new(RefCell::new(function))));
+        Ok(None)
+    }
+
+    fn visit_block(&mut self, block: &Block) -> Result<Option<Self::R>, Self::E> {
         let new_environment = Rc::new(RefCell::new(Environment::new(Some(self.environment.clone()))));
         self.execute_block(&block.stmts, new_environment)?;
         Ok(None)
     }
 
-    fn visit_if_stmt(&mut self, if_stmt: &IfStmt) -> Result<Option<Self::R>, (Token, String)> {
+    fn visit_if_stmt(&mut self, if_stmt: &IfStmt) -> Result<Option<Self::R>, Self::E> {
         if let Some(condition) = self.visit_expr(&if_stmt.condition)? &&
            self.is_truthy(condition) {
             self.visit_stmt(&if_stmt.then_stmt)?;
@@ -168,18 +207,29 @@ impl Visitor for Interpreter {
         Ok(None)
     }
 
-    fn visit_while_stmt(&mut self, while_stmt: &WhileStmt) -> Result<Option<Self::R>, (Token, String)> {
+    fn visit_while_stmt(&mut self, while_stmt: &WhileStmt) -> Result<Option<Self::R>, Self::E> {
         while let Some(condition) = self.visit_expr(&while_stmt.condition)? && self.is_truthy(condition) {
             self.visit_stmt(&*while_stmt.stmt)?;
         }
         Ok(None)
     }
+
+    fn visit_return_stmt(&mut self, return_stmt: &ReturnStmt) -> Result<Option<Self::R>, Self::E> {
+        let value = if let Some(value) = &return_stmt.value {
+            self.visit_expr(value)?.unwrap()
+        } else {
+            Value::Nil
+        };
+        Err(ErrType::Return(value))
+    }
 }
 
 impl Interpreter {
     pub fn new() -> Self {
+        let environment = Rc::new(RefCell::new(Environment::new(None)));
         Self { 
-            environment: Rc::new(RefCell::new(Environment::new(None)))
+            globals: environment.clone(),
+            environment: environment
         }
     }
 
@@ -209,28 +259,28 @@ impl Interpreter {
         *left == *right
     }
 
-    fn check_number_operand(&self, operator: &Token, operand: &Value) -> Result<(), (Token, String)> {
+    fn check_number_operand(&self, operator: &Token, operand: &Value) -> Result<(), ErrType> {
         if let Value::Number(_) = operand {
             return Ok(());
         }
-        Err((operator.clone(), "Operand must be a number.".to_string()))
+        Err(ErrType::Err(operator.clone(), "Operand must be a number.".to_string()))
     }
 
-    fn check_number_operands(&self, operator: &Token, left: &Value, right: &Value) -> Result<(), (Token, String)> {
+    fn check_number_operands(&self, operator: &Token, left: &Value, right: &Value) -> Result<(), ErrType> {
         if self.check_number_operand(operator, left).is_ok() && 
            self.check_number_operand(operator, right).is_ok() {
             return Ok(());
         }
-        Err((operator.clone(), "Operands must be numbers.".to_string()))
+        Err(ErrType::Err(operator.clone(), "Operands must be numbers.".to_string()))
     }
 
-    fn execute_block(&mut self, stmts: &Vec<Stmt>, environment: Rc<RefCell<Environment>>) -> Result<(), (Token, String)> {
+    pub fn execute_block(&mut self, stmts: &Vec<Stmt>, environment: Rc<RefCell<Environment>>) -> Result<(), ErrType> {
         let previous = self.environment.clone();
         self.environment = environment;
         for stmt in stmts {
-            if let Err((token, message)) = self.visit_stmt(stmt) {
+            if let Err(ErrType::Err(token, message)) = self.visit_stmt(stmt) {
                 self.environment = previous;
-                return Err((token, message));
+                return Err(ErrType::Err(token, message));
             }
         }
         self.environment = previous;
@@ -243,6 +293,7 @@ pub enum Value {
     Bool(bool),
     String(String),
     Number(f64),
+    Function(Rc<RefCell<Function>>),
     Nil
 }
 
@@ -279,4 +330,9 @@ impl Value {
             None
         }
     }
+}
+
+pub enum ErrType {
+    Err(Token, String),
+    Return(Value)
 }

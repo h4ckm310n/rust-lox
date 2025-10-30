@@ -8,3 +8,5 @@ pub mod visit;
 pub mod resolver;
 pub mod interpreter;
 pub mod environment;
+pub mod callable;
+pub mod function;
