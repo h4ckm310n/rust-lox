@@ -1,10 +1,10 @@
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::{ast::{expr::*, stmt::*}, error::ErrorReporter, token::Token, visit::*};
+use crate::{ast::{expr::*, stmt::*}, error::ErrorReporter, interpreter::Interpreter, token::Token, visit::*};
 
 pub struct Resolver {
-    scope_stack: Vec<HashMap<String, bool>>,
-    locals: RefCell<HashMap<Expr, usize>>,
+    interpreter: Rc<RefCell<Interpreter>>,
+    scope_stack: Vec<HashMap<String, bool>>
 }
 
 impl Visitor for Resolver {
@@ -66,16 +66,16 @@ impl Visitor for Resolver {
 }
 
 impl Resolver {
-    pub fn new() -> Self {
+    pub fn new(interpreter: Rc<RefCell<Interpreter>>) -> Self {
         Self {
-            scope_stack: Vec::new(),
-            locals: RefCell::new(HashMap::new())
+            interpreter: interpreter,
+            scope_stack: Vec::new()
         }
     }
 
-    pub fn resolve(&mut self, stmts: Vec<Stmt>) {
+    pub fn resolve(&mut self, stmts: &Vec<Stmt>) {
         for stmt in stmts {
-            self.visit_stmt(&stmt);
+            self.visit_stmt(stmt);
         }
     }
 
@@ -112,7 +112,7 @@ impl Resolver {
         for scope in self.scope_stack.iter().rev() {
             i -= 1;
             if scope.contains_key(&name.text) {
-                self.resolve_depth(expr.clone(),self.scope_stack.len()-1-i);
+                self.interpreter.borrow_mut().resolve_depth(expr.clone(),self.scope_stack.len()-1-i);
             }
         }
     }
@@ -125,10 +125,6 @@ impl Resolver {
         }
         self.default_visit_fun_decl(fun_decl);
         self.end_scope();
-    }
-
-    fn resolve_depth(&self, expr: Expr, depth: usize) {
-        self.locals.borrow_mut().insert(expr, depth);
     }
 }
 

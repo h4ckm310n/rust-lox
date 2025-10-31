@@ -1,6 +1,6 @@
-use std::{collections::HashMap, path::PathBuf, fs};
+use std::{cell::RefCell, collections::HashMap, fs, path::PathBuf, rc::Rc};
 use walkdir::WalkDir;
-use crate::{parser::Parser, resolver::Resolver, scanner::Scanner};
+use crate::{interpreter::Interpreter, parser::Parser, resolver::Resolver, scanner::Scanner};
 
 pub struct Project {
     pub path: PathBuf,
@@ -42,18 +42,21 @@ impl Project {
 
     pub fn compile(&mut self) {
         for (path, content) in &self.files {
+            //println!("file: {}", path.to_string_lossy());
             let mut scanner = Scanner::new(path.to_string_lossy().to_string(), content.clone());
             let tokens = scanner.scan_tokens();
             if *scanner.had_error.borrow() {
                 continue;
             }
-            let mut parser = Parser::new(path.to_string_lossy().to_string(), tokens);
+            let parser = Parser::new(path.to_string_lossy().to_string(), tokens);
             let stmts = parser.parse();
             if *parser.had_error.borrow() {
                 continue;
             }
-            let mut resolver = Resolver::new();
-            resolver.resolve(stmts);
+            let interpreter = Rc::new(RefCell::new(Interpreter::new()));
+            let mut resolver = Resolver::new(interpreter.clone());
+            resolver.resolve(&stmts);
+            interpreter.borrow_mut().interpret(&stmts);
         }
     }
 }

@@ -1,6 +1,5 @@
 use std::any::Any;
-
-use crate::{ast::{expr::*, stmt::*}, token::Token};
+use crate::ast::{expr::*, stmt::*};
 
 pub trait Visitor {
     type R: Any;
@@ -203,7 +202,7 @@ pub trait Visitor {
         self.visit_expr(&*unary_expr.expr)
     }
 
-    fn default_visit_literal_expr(&mut self, literal_expr: &LiteralExpr) -> Result<Option<Self::R>, Self::E> {
+    fn default_visit_literal_expr(&mut self, _literal_expr: &LiteralExpr) -> Result<Option<Self::R>, Self::E> {
         Ok(None)
     }
 
@@ -211,7 +210,7 @@ pub trait Visitor {
         self.visit_expr(&*grouping_expr.expr)
     }
 
-    fn default_visit_identifier(&mut self, identifier: &Identifier) -> Result<Option<Self::R>, Self::E> {
+    fn default_visit_identifier(&mut self, _identifier: &Identifier) -> Result<Option<Self::R>, Self::E> {
         Ok(None)
     }
 
@@ -237,11 +236,11 @@ pub trait Visitor {
         Ok(None)
     }
 
-    fn default_visit_this(&mut self, this: &This) -> Result<Option<Self::R>, Self::E> {
+    fn default_visit_this(&mut self, _this: &This) -> Result<Option<Self::R>, Self::E> {
         Ok(None)
     }
 
-    fn default_visit_super(&mut self, super_expr: &Super) -> Result<Option<Self::R>, Self::E> {
+    fn default_visit_super(&mut self, _super_expr: &Super) -> Result<Option<Self::R>, Self::E> {
         Ok(None)
     }
 }

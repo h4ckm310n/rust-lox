@@ -5,11 +5,13 @@ use crate::token::{Literal, Token, TokenType};
 use crate::visit::*;
 use crate::ast::{expr::*, stmt::*};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 pub struct Interpreter {
     pub globals: Rc<RefCell<Environment>>,
-    environment: Rc<RefCell<Environment>>
+    environment: Rc<RefCell<Environment>>,
+    locals: HashMap<Expr, usize>,
 }
 
 impl Visitor for Interpreter {
@@ -118,7 +120,10 @@ impl Visitor for Interpreter {
                 Value::Nil
             }
         };
-        if let Err((token, message)) = self.environment.borrow_mut().assign(&assign_expr.name, value.to_owned()) {
+        if let Some(distance) = self.locals.get(&Expr::Assign(assign_expr.to_owned())) {
+            self.environment.borrow_mut().assign_at(*distance, &assign_expr.name, value.to_owned());
+        }
+        else if let Err((token, message)) = self.environment.borrow_mut().assign(&assign_expr.name, value.to_owned()) {
             return Err(ErrType::Err(token, message));
         };
         Ok(Some(value))
@@ -158,15 +163,7 @@ impl Visitor for Interpreter {
     }
 
     fn visit_identifier(&mut self, identifier: &Identifier) -> Result<Option<Self::R>, Self::E> {
-        let variable = self.environment.borrow().get(&identifier.name);
-        if let Err((token, message)) = variable {
-            Err(ErrType::Err(token, message))
-        } else if let Ok(variable) = variable {
-            Ok(Some(variable))
-        } else {
-            // unreachable
-            Ok(None)
-        }
+        Ok(self.look_up_variable(&identifier.name, Expr::Identifier(identifier.to_owned()))?)
     }
 
     fn visit_var_decl(&mut self, var_decl: &VarDecl) -> Result<Option<Self::R>, Self::E> {
@@ -222,6 +219,16 @@ impl Visitor for Interpreter {
         };
         Err(ErrType::Return(value))
     }
+
+    fn visit_print_stmt(&mut self, print_stmt: &PrintStmt) -> Result<Option<Self::R>, Self::E> {
+        let value = self.visit_expr(&print_stmt.expr)?;
+        if let Some(value) = value {
+            println!("{}", value.stringify());
+        } else {
+            println!("nil");
+        }
+        Ok(None)
+    }
 }
 
 impl Interpreter {
@@ -229,15 +236,16 @@ impl Interpreter {
         let environment = Rc::new(RefCell::new(Environment::new(None)));
         Self { 
             globals: environment.clone(),
-            environment: environment
+            environment: environment,
+            locals: HashMap::new()
         }
     }
 
-    pub fn interpret(&mut self, expr: &Expr) {
-        if self.visit_expr(expr).is_ok() {
+    pub fn interpret(&mut self, stmts: &Vec<Stmt>) {
+        for stmt in stmts {
+            if let Err(err) = self.visit_stmt(stmt) {
 
-        } else {
-
+            }
         }
     }
 
@@ -286,6 +294,27 @@ impl Interpreter {
         self.environment = previous;
         Ok(())
     }
+
+    pub fn resolve_depth(&mut self, expr: Expr, depth: usize) {
+        self.locals.insert(expr, depth);
+    }
+
+    fn look_up_variable(&self, name: &Token, expr: Expr) -> Result<Option<Value>, ErrType> {
+        let distance = self.locals.get(&expr);
+        if let Some(distance) = distance {
+            Ok(Some(self.environment.borrow().get_at(*distance, name.text.clone())))
+        } else {
+            let variable = self.globals.borrow().get(name);
+            if let Err((token, message)) = variable {
+                Err(ErrType::Err(token, message))
+            } else if let Ok(variable) = variable {
+                Ok(Some(variable))
+            } else {
+                // unreachable
+                Ok(None)
+            }
+        }
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -328,6 +357,16 @@ impl Value {
             Some(value.clone())
         } else {
             None
+        }
+    }
+
+    fn stringify(&self) -> String {
+        match &self {
+            Self::Bool(value) => value.to_string(),
+            Self::String(value) => value.clone(),
+            Self::Number(value) => value.to_string(),
+            Self::Function(fun) => fun.borrow().to_string(),
+            Self::Nil => "nil".to_string()
         }
     }
 }

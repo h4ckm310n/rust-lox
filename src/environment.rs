@@ -45,4 +45,29 @@ impl Environment {
         }
         Err((name.clone(), format!("Undefined variable '{}'.", name.text)))
     }
+
+    pub fn assign_at(&mut self, distance: usize, name: &Token, value: Value) {
+        if distance == 0 {
+            self.values.insert(name.text.clone(), value);
+        } else {
+            self.ancestor(distance).borrow_mut().values.insert(name.text.clone(), value);
+        }
+    }
+
+    pub fn get_at(&self, distance: usize, name: String) -> Value {
+        if distance == 0 {
+            self.values.get(&name).unwrap().to_owned()
+        } else {
+            self.ancestor(distance).borrow().values.get(&name).unwrap().to_owned()
+        }
+    }
+
+    fn ancestor(&self, distance: usize) -> Rc<RefCell<Environment>> {
+        let mut environment = self.enclosing.as_ref().unwrap().clone();
+        for _ in 1..distance {
+            let next = environment.borrow().enclosing.as_ref().unwrap().clone();
+            environment = next;
+        }
+        environment
+    }
 }
