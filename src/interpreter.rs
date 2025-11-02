@@ -1,12 +1,15 @@
+use crate::class::Class;
 use crate::environment::Environment;
 use crate::function::Function;
 use crate::callable::Callable;
+use crate::instance::Instance;
 use crate::token::{Literal, Token, TokenType};
 use crate::visit::*;
 use crate::ast::{expr::*, stmt::*};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct Interpreter {
     pub globals: Rc<RefCell<Environment>>,
@@ -146,24 +149,73 @@ impl Visitor for Interpreter {
     }
 
     fn visit_call_expr(&mut self, call_expr: &CallExpr) -> Result<Option<Self::R>, Self::E> {
+        if let Expr::Identifier(identifier) = &*call_expr.name && identifier.name.text == "clock" {
+            return Ok(Some(Value::Number(SystemTime::now().duration_since(UNIX_EPOCH).expect("").as_secs_f64())));
+        }
         let callee = self.visit_expr(&call_expr.name)?;
-        let function = if callee.is_some() && let Value::Function(function) = callee.unwrap() {
-            function
+        let callable = if callee.is_some() && let Some(callable) = callee.unwrap().to_callable() {
+            callable
         } else {
             return Err(ErrType::Err(call_expr.paren.clone(), "Can only call functions and classes.".to_string()));
         };
-        if call_expr.args.len() != function.borrow().arity() {
-            return Err(ErrType::Err(call_expr.paren.clone(), format!("Expected {} arguments but got {}.", call_expr.args.len(), function.borrow().arity())));
+        if call_expr.args.len() != callable.borrow().arity() {
+            return Err(ErrType::Err(call_expr.paren.clone(), format!("Expected {} arguments but got {}.", call_expr.args.len(), callable.borrow().arity())));
         }
         let mut arguments = Vec::new();
         for argument in &call_expr.args {
             arguments.push(self.visit_expr(argument)?.unwrap());
         }
-        Ok(Some(function.borrow().call(self, arguments)))
+        Ok(Some(callable.borrow().call(self, arguments)))
+    }
+
+    fn visit_get_expr(&mut self, get_expr: &GetExpr) -> Result<Option<Self::R>, Self::E> {
+        let object = self.visit_expr(&get_expr.object)?;
+        if object.is_some() && let Value::Instance(instance) = object.as_ref().unwrap() {
+            let binding = instance.borrow();
+            let field = binding.get(&get_expr.name)?;
+            return Ok(Some(field));
+        }
+        Err(ErrType::Err(get_expr.name.clone(), "Only instances have properties.".to_string()))
+    }
+
+    fn visit_set_expr(&mut self, set_expr: &SetExpr) -> Result<Option<Self::R>, Self::E> {
+        let object = self.visit_expr(&set_expr.object)?;
+        if object.is_some() && let Some(instance) = object.unwrap().to_instance() {
+            let value = self.visit_expr(&set_expr.value)?;
+            if let Some(value) = value.as_ref() {
+                instance.borrow_mut().set(&set_expr.name, value.to_owned());
+            };
+            return Ok(value);
+        }
+        Err(ErrType::Err(set_expr.name.clone(), "Only instances have fields.".to_string()))
     }
 
     fn visit_identifier(&mut self, identifier: &Identifier) -> Result<Option<Self::R>, Self::E> {
+        if identifier.name.text == "clock" {
+            return Ok(Some(Value::String("<native fn>".to_string())));
+        }
         Ok(self.look_up_variable(&identifier.name, Expr::Identifier(identifier.to_owned()))?)
+    }
+
+    fn visit_this(&mut self, this: &This) -> Result<Option<Self::R>, Self::E> {
+        Ok(self.look_up_variable(&this.keyword, Expr::This(this.to_owned()))?)
+    }
+
+    fn visit_super(&mut self, super_expr: &Super) -> Result<Option<Self::R>, Self::E> {
+        let distance = self.locals.get(&Expr::Super(super_expr.to_owned())).unwrap();
+        let superclass = self.environment.borrow().get_at(*distance, "super".to_string());
+        let instance = self.environment.borrow().get_at(*distance-1, "this".to_string());
+        if let (Value::Class(superclass), Value::Instance(instance)) = (superclass, instance) {
+            let method = superclass.borrow().find_method(super_expr.method.text.clone());
+            if let Some(method) = method {
+                return Ok(Some(Value::Function(Rc::new(RefCell::new(method.borrow().bind(instance))))));
+            } else {
+                return Err(ErrType::Err(super_expr.method.clone(), format!("Undefined property'{}'.", super_expr.method.text)));
+            }
+        }
+
+        // unreachable
+        Ok(None)
     }
 
     fn visit_var_decl(&mut self, var_decl: &VarDecl) -> Result<Option<Self::R>, Self::E> {
@@ -181,10 +233,53 @@ impl Visitor for Interpreter {
     }
 
     fn visit_fun_decl(&mut self, fun_decl: &FunDecl) -> Result<Option<Self::R>, Self::E> {
-        let function = Function::new(fun_decl.clone(), self.environment.clone());
+        let function = Function::new(fun_decl.clone(), self.environment.clone(), false);
         self.environment.borrow_mut().define(
             fun_decl.name.text.clone(), 
             Value::Function(Rc::new(RefCell::new(function))));
+        Ok(None)
+    }
+
+    fn visit_class_decl(&mut self, class_decl: &ClassDecl) -> Result<Option<Self::R>, Self::E> {
+        let superclass = if let Some(identifier) = &class_decl.superclass {
+            let superclass = self.visit_identifier(identifier)?;
+            if let Some(superclass) = superclass && let Value::Class(superclass) = superclass {
+                Some(superclass)
+            } else {
+                return Err(ErrType::Err(identifier.name.clone(), "Superclass must be a class.".to_string()));
+            }
+        } else {
+            None
+        };
+
+        self.environment.borrow_mut().define(class_decl.name.text.clone(), Value::Nil);
+
+        if let Some(superclass) = superclass.as_ref() {
+            self.environment = Rc::new(RefCell::new(Environment::new(Some(self.environment.clone()))));
+            self.environment.borrow_mut().define("super".to_string(), Value::Class(superclass.clone()));
+        }
+
+        let mut methods = HashMap::new();
+        for method in &class_decl.methods {
+            let is_initializer = method.name.text == "init";
+            let function = Function::new(method.clone(), self.environment.clone(), is_initializer);
+            methods.insert(method.name.text.clone(), Rc::new(RefCell::new(function)));
+        }
+
+        let class = Rc::new(RefCell::new(Class::new(class_decl.name.text.clone(), methods, superclass.to_owned())));
+        class.borrow_mut().set_rc_self(class.clone());
+        
+        if superclass.is_some() {
+            let enclosing = self.environment.borrow().enclosing.clone().unwrap();
+            self.environment = enclosing;
+        }
+
+        if let Err((token, message)) = 
+            self.environment.borrow_mut().assign(
+                &class_decl.name, 
+                Value::Class(class.clone())) {
+            return Err(ErrType::Err(token, message));
+        }
         Ok(None)
     }
 
@@ -243,8 +338,9 @@ impl Interpreter {
 
     pub fn interpret(&mut self, stmts: &Vec<Stmt>) {
         for stmt in stmts {
-            if let Err(err) = self.visit_stmt(stmt) {
-
+            if let Err(ErrType::Err(token, message)) = self.visit_stmt(stmt) {
+                println!("Runtime error: {} {} {}", token.start, token.end, message);
+                break;
             }
         }
     }
@@ -286,9 +382,13 @@ impl Interpreter {
         let previous = self.environment.clone();
         self.environment = environment;
         for stmt in stmts {
-            if let Err(ErrType::Err(token, message)) = self.visit_stmt(stmt) {
+            let result = self.visit_stmt(stmt);
+            if let Err(ErrType::Err(token, message)) = result {
                 self.environment = previous;
                 return Err(ErrType::Err(token, message));
+            } else if let Err(ErrType::Return(value)) = result {
+                self.environment = previous;
+                return Err(ErrType::Return(value));
             }
         }
         self.environment = previous;
@@ -323,6 +423,8 @@ pub enum Value {
     String(String),
     Number(f64),
     Function(Rc<RefCell<Function>>),
+    Class(Rc<RefCell<Class>>),
+    Instance(Rc<RefCell<Instance>>),
     Nil
 }
 
@@ -360,12 +462,30 @@ impl Value {
         }
     }
 
+    fn to_instance(&self) -> Option<Rc<RefCell<Instance>>> {
+        if let Self::Instance(instance) = self {
+            Some(instance.clone())
+        } else {
+            None
+        }
+    }
+
+    fn to_callable(&self) -> Option<Rc<RefCell<dyn Callable>>> {
+        match self {
+            Self::Function(function) => Some(Rc::clone(function) as Rc<RefCell<dyn Callable>>),
+            Self::Class(class) => Some(Rc::clone(class) as Rc<RefCell<dyn Callable>>),
+            _ => None
+        }
+    }
+
     fn stringify(&self) -> String {
         match &self {
             Self::Bool(value) => value.to_string(),
             Self::String(value) => value.clone(),
             Self::Number(value) => value.to_string(),
             Self::Function(fun) => fun.borrow().to_string(),
+            Self::Class(class) => class.borrow().to_string(),
+            Self::Instance(instance) => instance.borrow().to_string(),
             Self::Nil => "nil".to_string()
         }
     }

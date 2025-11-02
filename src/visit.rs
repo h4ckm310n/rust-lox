@@ -156,7 +156,10 @@ pub trait Visitor {
     }
 
     fn default_visit_fun_decl(&mut self, fun_decl: &FunDecl) -> Result<Option<Self::R>, Self::E> {
-        self.visit_stmt(&*fun_decl.body)
+        for stmt in &fun_decl.body {
+            self.visit_stmt(stmt)?;
+        }
+        Ok(None)
     }
 
     fn default_visit_class_decl(&mut self, class_decl: &ClassDecl) -> Result<Option<Self::R>, Self::E> {

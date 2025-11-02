@@ -56,6 +56,9 @@ impl Project {
             let interpreter = Rc::new(RefCell::new(Interpreter::new()));
             let mut resolver = Resolver::new(interpreter.clone());
             resolver.resolve(&stmts);
+            if *resolver.had_error.borrow() {
+                continue;
+            }
             interpreter.borrow_mut().interpret(&stmts);
         }
     }

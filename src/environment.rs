@@ -7,7 +7,7 @@ use crate::token::Token;
 
 #[derive(PartialEq)]
 pub struct Environment {
-    enclosing: Option<Rc<RefCell<Environment>>>,
+    pub enclosing: Option<Rc<RefCell<Environment>>>,
     values: HashMap<String, Value>
 }
 

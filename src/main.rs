@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, path::PathBuf};
+use std::{env, path::PathBuf};
 use rust_lox::project::Project;
 
 

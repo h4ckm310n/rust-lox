@@ -10,3 +10,5 @@ pub mod interpreter;
 pub mod environment;
 pub mod callable;
 pub mod function;
+pub mod class;
+pub mod instance;

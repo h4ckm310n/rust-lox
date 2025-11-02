@@ -475,11 +475,15 @@ impl Parser {
         self.consume(TokenType::RightParen, "Expect ')' after parameters.".to_string())?;
         self.consume(TokenType::LeftBrace, "Expect '{' before ".to_owned()+&kind+" name.")?;
         let body = self.parse_block()?;
+        let mut body_stmts = Vec::new();
+        if let Stmt::Block(block) = body {
+            body_stmts = block.stmts;
+        }
         Ok(Stmt::FunDecl(
             FunDecl { 
                 name: identifier.clone(), 
                 params: params, 
-                body: Box::new(body)
+                body: body_stmts
             }
         ))
     }

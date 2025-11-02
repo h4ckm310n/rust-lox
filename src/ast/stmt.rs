@@ -57,7 +57,7 @@ pub struct VarDecl {
 pub struct FunDecl {
     pub name: Token,
     pub params: Vec<Token>,
-    pub body: Box<Stmt>
+    pub body: Vec<Stmt>
 }
 
 #[derive(Clone, Eq, Hash, PartialEq)]

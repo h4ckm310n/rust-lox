@@ -4,7 +4,10 @@ use crate::{ast::{expr::*, stmt::*}, error::ErrorReporter, interpreter::Interpre
 
 pub struct Resolver {
     interpreter: Rc<RefCell<Interpreter>>,
-    scope_stack: Vec<HashMap<String, bool>>
+    scope_stack: Vec<HashMap<String, bool>>,
+    current_function: Rc<RefCell<FunctionType>>,
+    current_class: Rc<RefCell<ClassType>>,
+    pub had_error: RefCell<bool>
 }
 
 impl Visitor for Resolver {
@@ -18,6 +21,16 @@ impl Visitor for Resolver {
         Ok(None)
     }
 
+    fn visit_return_stmt(&mut self, return_stmt: &ReturnStmt) -> Result<Option<Self::R>, Self::E> {
+        if *self.current_function.borrow() == FunctionType::None {
+            self.error(return_stmt.keyword.start, return_stmt.keyword.end, "Can't return from top-level code.".to_string());
+        }
+        if return_stmt.value.is_some() && *self.current_function.borrow() == FunctionType::Initializer {
+            self.error(return_stmt.keyword.start, return_stmt.keyword.end, "Can't return a value from initializer.".to_string());
+        }
+        self.default_visit_return_stmt(return_stmt)
+    }
+
     fn visit_var_decl(&mut self, var_decl: &VarDecl) -> Result<Option<Self::R>, Self::E> {
         self.declare(var_decl.name.clone());
         self.default_visit_var_decl(var_decl)?;
@@ -28,21 +41,39 @@ impl Visitor for Resolver {
     fn visit_fun_decl(&mut self, fun_decl: &FunDecl) -> Result<Option<Self::R>, Self::E> {
         self.declare(fun_decl.name.clone());
         self.define(fun_decl.name.clone());
-        self.resolve_function(fun_decl);
+        self.resolve_function(fun_decl, FunctionType::Function);
         Ok(None)
     }
 
     fn visit_class_decl(&mut self, class_decl: &ClassDecl) -> Result<Option<Self::R>, Self::E> {
+        let enclosing_class = self.current_class.clone();
+        self.current_class = Rc::new(RefCell::new(ClassType::Class));
         self.declare(class_decl.name.clone());
         self.define(class_decl.name.clone());
         if let Some(superclass) = &class_decl.superclass && superclass.name == class_decl.name {
-            self.error(superclass.name.start, superclass.name.end, "A class can't inherit from itself.".to_string());
-            return Err((superclass.name.clone(), "".to_string()));
+            self.error(superclass.name.start, superclass.name.end, "A class can't inherit from itself.".to_string());        
+        }
+        if let Some(superclass) = &class_decl.superclass {
+            self.current_class = Rc::new(RefCell::new(ClassType::SubClass));
+            self.visit_identifier(superclass)?;
+            self.begin_scope();
+            self.scope_stack.last_mut().unwrap().insert("super".to_string(), true);
         }
         self.begin_scope();
         self.scope_stack.last_mut().unwrap().insert("this".to_string(), true);
-        self.default_visit_class_decl(class_decl)?;
+        for method in &class_decl.methods {
+            let declaration = if method.name.text == "init" {
+                FunctionType::Initializer
+            } else {
+                FunctionType::Method
+            };
+            self.resolve_function(method, declaration);
+        }
         self.end_scope();
+        if class_decl.superclass.is_some() {
+            self.end_scope();
+        }
+        self.current_class = enclosing_class;
         Ok(None)
     }
 
@@ -51,16 +82,34 @@ impl Visitor for Resolver {
            && let Some(state) = scope.get(&identifier.name.text) 
            && *state == false {
             self.error(identifier.name.start, identifier.name.end, "Can't read local variable in its own initializer.".to_string());
-            return Err((identifier.name.clone(), "".to_string()));
         }
-        self.resolve_local(Expr::Identifier(identifier.clone()), identifier.name.clone());
+        self.resolve_local(Expr::Identifier(identifier.clone()), &identifier.name);
         self.default_visit_identifier(identifier)?;
         Ok(None)
     }
 
     fn visit_assign_expr(&mut self, assign_expr: &AssignExpr) -> Result<Option<Self::R>, Self::E> {
         self.default_visit_assign_expr(assign_expr)?;
-        self.resolve_local(Expr::Assign(assign_expr.clone()), assign_expr.name.clone());
+        self.resolve_local(Expr::Assign(assign_expr.clone()), &assign_expr.name);
+        Ok(None)
+    }
+
+    fn visit_this(&mut self, this: &This) -> Result<Option<Self::R>, Self::E> {
+        if *self.current_class.borrow() == ClassType::None {
+            self.error(this.keyword.start, this.keyword.end, "Can't use 'this' outside of a class.".to_string());
+            return Ok(None);
+        }
+        self.resolve_local(Expr::This(this.clone()), &this.keyword);
+        Ok(None)
+    }
+
+    fn visit_super(&mut self, super_expr: &Super) -> Result<Option<Self::R>, Self::E> {
+        if *self.current_class.borrow() == ClassType::None {
+            self.error(super_expr.keyword.start, super_expr.keyword.end, "Can't use 'super' outside of a class.".to_string());
+        } else if *self.current_class.borrow() != ClassType::SubClass {
+            self.error(super_expr.keyword.start, super_expr.keyword.end, "Can't use 'super' in a class with no superclass.".to_string());
+        }
+        self.resolve_local(Expr::Super(super_expr.clone()), &super_expr.keyword);
         Ok(None)
     }
 }
@@ -69,7 +118,10 @@ impl Resolver {
     pub fn new(interpreter: Rc<RefCell<Interpreter>>) -> Self {
         Self {
             interpreter: interpreter,
-            scope_stack: Vec::new()
+            scope_stack: Vec::new(),
+            current_function: Rc::new(RefCell::new(FunctionType::None)),
+            current_class: Rc::new(RefCell::new(ClassType::None)),
+            had_error: RefCell::new(false)
         }
     }
 
@@ -107,7 +159,7 @@ impl Resolver {
         }
     }
 
-    fn resolve_local(&mut self, expr: Expr, name: Token) {
+    fn resolve_local(&mut self, expr: Expr, name: &Token) {
         let mut i = self.scope_stack.len();
         for scope in self.scope_stack.iter().rev() {
             i -= 1;
@@ -117,7 +169,9 @@ impl Resolver {
         }
     }
 
-    fn resolve_function(&mut self, fun_decl: &FunDecl) {
+    fn resolve_function(&mut self, fun_decl: &FunDecl, function_type: FunctionType) {
+        let enclosing_function = self.current_function.clone();
+        self.current_function = Rc::new(RefCell::new(function_type));
         self.begin_scope();
         for param in &fun_decl.params {
             self.declare(param.clone());
@@ -125,11 +179,28 @@ impl Resolver {
         }
         self.default_visit_fun_decl(fun_decl);
         self.end_scope();
+        self.current_function = enclosing_function.clone();
     }
 }
 
 impl ErrorReporter for Resolver {
     fn error(&self, start: usize, end: usize, error_content: String) {
-        
+        *self.had_error.borrow_mut() = true;
+        println!("Resolve error: {start} {end}: {error_content}");
     }
+}
+
+#[derive(PartialEq)]
+enum FunctionType {
+    None,
+    Function,
+    Initializer,
+    Method
+}
+
+#[derive(PartialEq)]
+enum ClassType {
+    None,
+    Class,
+    SubClass
 }
