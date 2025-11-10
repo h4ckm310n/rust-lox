@@ -1,6 +1,6 @@
 pub struct Scanner {
     file_path: String,
-    source: Vec<char>,
+    pub source: Vec<char>,
     start: usize,
     current: usize,
     line: usize
@@ -28,7 +28,7 @@ impl Scanner {
         }
     }
 
-    fn scan_token(&mut self) -> Result<Token, (&str, usize)> {
+    pub fn scan_token(&mut self) -> Result<Token, (String, usize)> {
         self.skip_whitespace();
         self.start = self.current;
         if self.is_at_end() { return Ok(self.make_token(TokenType::Eof)); }
@@ -83,7 +83,7 @@ impl Scanner {
             }
             _ => ()
         }
-        Err(("Unexpected character.", self.line))
+        Err(("Unexpected character.".to_string(), self.line))
     }
 
     fn make_token(&self, token_type: TokenType) -> Token {
@@ -153,7 +153,7 @@ impl Scanner {
         self.source[self.current+1]
     }
 
-    fn scan_string(&mut self) -> Result<Token, (&str, usize)> {
+    fn scan_string(&mut self) -> Result<Token, (String, usize)> {
         while self.peek() != '"' && !self.is_at_end() {
             if self.peek() == '\n' {
                 self.line += 1;
@@ -162,7 +162,7 @@ impl Scanner {
         }
         if self.is_at_end() {
             // error, no " at the end
-            return Err(("Unterminated string.", self.line));
+            return Err(("Unterminated string.".to_string(), self.line));
         }
         // close "
         self.advance();
@@ -248,10 +248,10 @@ impl Scanner {
 
 #[derive(PartialEq, Clone, Eq, Hash)]
 pub struct Token {
-    token_type: TokenType,
-    start: usize,
-    lenght: usize,
-    line: usize
+    pub token_type: TokenType,
+    pub start: usize,
+    pub lenght: usize,
+    pub line: usize
 }
 
 #[derive(PartialEq, Clone, Eq, Hash)]

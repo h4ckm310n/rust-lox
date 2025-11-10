@@ -1,12 +1,13 @@
 use std::{collections::HashMap, env, fs, path::PathBuf};
 
-use rust_lox::compiler::compile;
+use rust_lox::vm::VM;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     let files = collect_files(PathBuf::from(args[1].clone()));
     for (path, content) in files {
-        compile(path.to_string_lossy().to_string(), content.clone());
+        let mut vm = VM::init();
+        vm.interpret(path.to_string_lossy().to_string(), content.clone());
     }
 }
 
