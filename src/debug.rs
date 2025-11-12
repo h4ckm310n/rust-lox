@@ -17,6 +17,24 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::Constant => {
             constant_instruction("OP_CONSTANT", chunk, offset)
         },
+        OpCode::True => {
+            simple_instruction("OP_TRUE", offset)
+        },
+        OpCode::False => {
+            simple_instruction("OP_FALSE", offset)
+        },
+        OpCode::Nil => {
+            simple_instruction("OP_NIL", offset)
+        },
+        OpCode::Equal => {
+            simple_instruction("OP_EQUAL", offset)
+        },
+        OpCode::Greater => {
+            simple_instruction("OP_GREATER", offset)
+        },
+        OpCode::Less => {
+            simple_instruction("OP_LESS", offset)
+        },
         OpCode::Add => {
             simple_instruction("OP_ADD", offset)
         },
@@ -29,6 +47,9 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::Divide => {
             simple_instruction("OP_DIVIDE", offset)
         },
+        OpCode::Not => {
+            simple_instruction("OP_NOT", offset)
+        }
         OpCode::Negate => {
             simple_instruction("OP_NEGATE", offset)
         }
@@ -46,7 +67,7 @@ fn simple_instruction(name: &str, offset: usize) -> usize {
 fn constant_instruction(name: &str, chunk: &Chunk, offset: usize) -> usize {
     let constant = chunk.codes[offset+1] as usize;
     print!("{name} {constant}");
-    print_value(chunk.constants.values[constant]);
+    print_value(chunk.constants.values[constant].clone());
     println!();
     offset + 2
 }

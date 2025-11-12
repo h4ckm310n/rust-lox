@@ -5,10 +5,17 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 #[repr(u8)]
 pub enum OpCode {
     Constant,
+    Nil,
+    True,
+    False,
+    Equal,
+    Greater,
+    Less,
     Add,
     Subtract,
     Multiply,
     Divide,
+    Not,
     Negate,
     Return
 }

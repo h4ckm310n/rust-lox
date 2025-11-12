@@ -37,9 +37,9 @@ impl<'a> Compiler<'a> {
         let token = self.parser.previous.clone().unwrap();
         if token.token_type == TokenType::Number {
             let chars = &self.parser.scanner.source[token.start..token.start+token.lenght];
-            let value = String::from_iter(chars).parse::<u8>();
+            let value = String::from_iter(chars).parse::<f64>();
             if let Ok(value) = value {
-                self.emit_constant(value.into());
+                self.emit_constant(Value::Number(value));
             }
         }
     }
@@ -53,6 +53,9 @@ impl<'a> Compiler<'a> {
         let operator_type = self.parser.previous.clone().unwrap().token_type;
         self.parse_precedence(Precedence::Unary);
         match operator_type {
+            TokenType::Bang => {
+                self.emit_byte(OpCode::Not.into());
+            },
             TokenType::Minus => {
                 self.emit_byte(OpCode::Negate.into());
             },
@@ -65,12 +68,27 @@ impl<'a> Compiler<'a> {
         let (_, _, precedence) = self.get_rule(&operator_type);
         self.parse_precedence((precedence as u8 + 1).try_into().unwrap());
         match operator_type {
+            TokenType::BangEqual => self.emit_bytes(OpCode::Equal.into(), OpCode::Not.into()),
+            TokenType::EqualEqual => self.emit_byte(OpCode::Equal.into()),
+            TokenType::Greater => self.emit_byte(OpCode::Greater.into()),
+            TokenType::GreaterEqual => self.emit_bytes(OpCode::Less.into(), OpCode::Not.into()),
+            TokenType::Less => self.emit_byte(OpCode::Less.into()),
+            TokenType::LessEqual => self.emit_bytes(OpCode::Greater.into(), OpCode::Not.into()),
             TokenType::Plus => self.emit_byte(OpCode::Add.into()),
             TokenType::Minus => self.emit_byte(OpCode::Subtract.into()),
             TokenType::Star => self.emit_byte(OpCode::Multiply.into()),
             TokenType::Slash => self.emit_byte(OpCode::Divide.into()),
             _ => ()
         };
+    }
+
+    fn literal(&mut self) {
+        match self.parser.previous.clone().unwrap().token_type {
+            TokenType::True => self.emit_byte(OpCode::True.into()),
+            TokenType::False => self.emit_byte(OpCode::False.into()),
+            TokenType::Nil => self.emit_byte(OpCode::Nil.into()),
+            _ => ()
+        }
     }
 
     fn parse_precedence(&mut self, precedence: Precedence) {
@@ -103,21 +121,21 @@ impl<'a> Compiler<'a> {
             TokenType::Semicolon => (None, None, Precedence::None),
             TokenType::Slash => (None, Some("binary".to_string()), Precedence::Factor),
             TokenType::Star => (None, Some("binary".to_string()), Precedence::Factor),
-            TokenType::Bang => (None, None, Precedence::None),
-            TokenType::BangEqual => (None, None, Precedence::None),
+            TokenType::Bang => (Some("binary".to_string()), None, Precedence::None),
+            TokenType::BangEqual => (None, Some("binary".to_string()), Precedence::Equality),
             TokenType::Equal => (None, None, Precedence::None),
-            TokenType::EqualEqual => (None, None, Precedence::None),
-            TokenType::Greater => (None, None, Precedence::None),
-            TokenType::GreaterEqual => (None, None, Precedence::None),
-            TokenType::Less => (None, None, Precedence::None),
-            TokenType::LessEqual => (None, None, Precedence::None),
+            TokenType::EqualEqual => (None, Some("binary".to_string()), Precedence::Equality),
+            TokenType::Greater => (None, Some("binary".to_string()), Precedence::Comparison),
+            TokenType::GreaterEqual => (None, Some("binary".to_string()), Precedence::Comparison),
+            TokenType::Less => (None, Some("binary".to_string()), Precedence::Comparison),
+            TokenType::LessEqual => (None, Some("binary".to_string()), Precedence::Comparison),
             TokenType::Identifier => (None, None, Precedence::None),
             TokenType::String => (None, None, Precedence::None),
             TokenType::Number => (Some("number".to_string()), None, Precedence::None),
             TokenType::And => (None, None, Precedence::None),
             TokenType::Or => (None, None, Precedence::None),
-            TokenType::True => (None, None, Precedence::None),
-            TokenType::False => (None, None, Precedence::None),
+            TokenType::True => (Some("literal".to_string()), None, Precedence::None),
+            TokenType::False => (Some("literal".to_string()), None, Precedence::None),
             TokenType::If => (None, None, Precedence::None),
             TokenType::Else => (None, None, Precedence::None),
             TokenType::For => (None, None, Precedence::None),
@@ -129,7 +147,7 @@ impl<'a> Compiler<'a> {
             TokenType::Var => (None, None, Precedence::None),
             TokenType::Class => (None, None, Precedence::None),
             TokenType::Fun => (None, None, Precedence::None),
-            TokenType::Nil => (None, None, Precedence::None),
+            TokenType::Nil => (Some("literal".to_string()), None, Precedence::None),
             TokenType::Eof => (None, None, Precedence::None),
         }
     }
@@ -140,6 +158,7 @@ impl<'a> Compiler<'a> {
             "unary" => self.unary(),
             "binary" => self.binary(),
             "number" => self.number(),
+            "literal" => self.literal(),
             _ => ()
         }
     }
