@@ -1,10 +1,13 @@
-use std::fmt;
+use std::{cell::RefCell, fmt, rc::Rc};
+
+use crate::object::Obj;
 
 #[derive(Clone)]
 pub enum Value {
     Nil,
     Boolean(bool),
-    Number(f64)
+    Number(f64),
+    Obj(Rc<RefCell<Obj>>)
 }
 
 impl Value {
@@ -19,6 +22,23 @@ impl Value {
     pub fn as_bool(&self) -> Option<bool> {
         if let Self::Boolean(boolean) = &self {
             Some(*boolean)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_obj(&self) -> Option<Rc<RefCell<Obj>>> {
+        if let Self::Obj(obj) = &self {
+            Some(obj.clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn as_string(&self) -> Option<String> {
+        if let Some(obj) = self.as_obj() &&
+           let Obj::String(string) = &*obj.borrow() {
+            Some(string.clone())
         } else {
             None
         }
@@ -39,6 +59,14 @@ impl Value {
             false
         }
     }
+
+    pub fn is_obj(&self) -> bool {
+        self.as_obj().is_some()
+    }
+
+    pub fn is_string(&self) -> bool {
+        self.as_string().is_some()
+    }
 }
 
 pub fn print_value(value: Value) {
@@ -49,6 +77,9 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
             Self::Nil => write!(f, "nil"),
+            Self::Obj(obj) => match &*obj.borrow() {
+                Obj::String(string) => write!(f, "{string}"),
+            }
             _ => write!(f, "{self}")
         }
     }
@@ -62,6 +93,11 @@ impl PartialEq for Value {
         match (self, other) {
             (Self::Boolean(l0), Self::Boolean(r0)) => l0 == r0,
             (Self::Number(l0), Self::Number(r0)) => l0 == r0,
+            (Self::Obj(l0), Self::Obj(r0)) => {
+                match (&*l0.borrow(), &*r0.borrow()) {
+                    (Obj::String(l0), Obj::String(r0)) => *l0 == *r0
+                }
+            },
             _ => false,
         }
     }

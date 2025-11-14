@@ -1,18 +1,20 @@
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{chunk::{Chunk, OpCode}, value::print_value};
 
-pub fn disassemble_chunk(chunk: Chunk, name: String) {
+pub fn disassemble_chunk(chunk: Rc<RefCell<Chunk>>, name: String) {
     println!("== {name} ==");
     let mut offset = 0;
-    let len = chunk.codes.len();
+    let len = chunk.borrow().codes.len();
     while offset < len {
-        offset = disassemble_instruction(&chunk, offset);
+        offset = disassemble_instruction(chunk.clone(), offset);
     }
 }
 
-pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
+pub fn disassemble_instruction(chunk: Rc<RefCell<Chunk>>, offset: usize) -> usize {
     print!("{offset}");
-    print!("{}", chunk.lines[offset]);
-    let instruction: Result<OpCode, _> = chunk.codes[offset].try_into();
+    print!("{}", chunk.borrow().lines[offset]);
+    let instruction: Result<OpCode, _> = chunk.borrow().codes[offset].try_into();
     match instruction.unwrap() {
         OpCode::Constant => {
             constant_instruction("OP_CONSTANT", chunk, offset)
@@ -64,10 +66,10 @@ fn simple_instruction(name: &str, offset: usize) -> usize {
     offset + 1
 }
 
-fn constant_instruction(name: &str, chunk: &Chunk, offset: usize) -> usize {
-    let constant = chunk.codes[offset+1] as usize;
+fn constant_instruction(name: &str, chunk: Rc<RefCell<Chunk>>, offset: usize) -> usize {
+    let constant = chunk.borrow().codes[offset+1] as usize;
     print!("{name} {constant}");
-    print_value(chunk.constants.values[constant].clone());
+    print_value(chunk.borrow().constants.values[constant].clone());
     println!();
     offset + 2
 }

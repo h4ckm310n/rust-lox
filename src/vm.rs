@@ -1,8 +1,10 @@
-use crate::{chunk::{Chunk, OpCode}, compiler::Compiler, debug::disassemble_instruction, value::Value};
+use std::{cell::RefCell, rc::Rc};
+
+use crate::{chunk::{Chunk, OpCode}, compiler::Compiler, debug::disassemble_instruction, object::Obj, value::Value};
 
 pub struct VM {
     ip: u8,
-    chunk: Chunk,
+    chunk: Rc<RefCell<Chunk>>,
     stack: Vec<Value>
 }
 
@@ -10,7 +12,7 @@ impl VM {
     pub fn init() -> Self {
         Self {
             ip: 0,
-            chunk: Chunk::new(),
+            chunk: Rc::new(RefCell::new(Chunk::new())),
             stack: Vec::new()
         }
     }
@@ -21,20 +23,20 @@ impl VM {
 
     pub fn interpret(&mut self, path: String, source: String) -> Result<(), InterpretError> {
         let mut compiler = Compiler::init(path.clone(), source.clone());
-        if !compiler.compile(&mut self.chunk) {
+        if !compiler.compile(self.chunk.clone()) {
             return Err(InterpretError::Compile);
         }
-        self.ip = self.chunk.codes[0];
+        self.ip = self.chunk.borrow().codes[0];
         self.run()
     }
 
     fn run(&mut self) -> Result<(), InterpretError> {
         loop {
-            disassemble_instruction(&self.chunk, self.ip as usize);
+            disassemble_instruction(self.chunk.clone(), self.ip as usize);
             let instruction: Result<OpCode, _> = self.read_byte().try_into();
             match instruction.unwrap() {
                 OpCode::Constant => {
-                    let constant = self.read_constant().clone();
+                    let constant = self.read_constant();
                     self.stack.push(constant);
                 },
                 OpCode::True => {
@@ -51,7 +53,19 @@ impl VM {
                 OpCode::Nil => {
                     self.stack.push(Value::Nil);
                 }
-                op @ (OpCode::Greater | OpCode::Less | OpCode::Add | OpCode::Subtract | OpCode::Multiply | OpCode::Divide) => {
+                OpCode::Add => {
+                    if self.peek(0).is_string() && self.peek(1).is_string() {
+                        self.concatenate();
+                    } else if self.peek(0).is_number() && self.peek(1).is_number() {
+                        let b = self.stack.pop().unwrap().as_number().unwrap();
+                        let a = self.stack.pop().unwrap().as_number().unwrap();
+                        self.stack.push(Value::Number(a + b))
+                    } else {
+                        self.runtime_error("Operands must be two numbers or two strings.");
+                        return Err(InterpretError::Runtime);
+                    }
+                }
+                op @ (OpCode::Greater | OpCode::Less | OpCode::Subtract | OpCode::Multiply | OpCode::Divide) => {
                     self.binary_op(op)?;
                 },
                 OpCode::Not => {
@@ -81,9 +95,9 @@ impl VM {
         self.ip
     }
 
-    fn read_constant(&mut self) -> &Value {
+    fn read_constant(&mut self) -> Value {
         let byte = self.read_byte();
-        &self.chunk.constants.values[byte as usize]
+        self.chunk.borrow().constants.values[byte as usize].clone()
     }
 
     fn binary_op(&mut self, op: OpCode) -> Result<(), InterpretError> {
@@ -105,13 +119,19 @@ impl VM {
         Ok(())
     }
 
+    fn concatenate(&mut self) {
+        let b = self.stack.pop().unwrap().as_string().unwrap();
+        let a = self.stack.pop().unwrap().as_string().unwrap();
+        self.stack.push(Value::Obj(Rc::new(RefCell::new(Obj::String(a + &b)))));
+    }
+
     fn peek(&mut self, distance: i8) -> &Value {
         &self.stack[(-1-distance) as usize]
     }
 
     fn runtime_error(&mut self, message: &str) {
         println!("{message}");
-        let line = self.chunk.lines[self.chunk.lines.len()-2];
+        let line = self.chunk.borrow().lines[self.chunk.borrow().lines.len()-2];
         println!("[line {line}] in script");
         self.reset_stack();
     }

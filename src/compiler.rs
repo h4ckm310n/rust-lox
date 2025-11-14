@@ -1,12 +1,14 @@
-use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenType}, value::Value};
+use std::{cell::RefCell, rc::Rc};
+
+use crate::{chunk::{Chunk, OpCode}, object::Obj, scanner::{Scanner, Token, TokenType}, value::Value};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
-pub struct Compiler<'a> {
-    current_chunk: Option<&'a mut Chunk>,
+pub struct Compiler {
+    current_chunk: Option<Rc<RefCell<Chunk>>>,
     parser: Parser
 }
 
-impl<'a> Compiler<'a> {
+impl Compiler {
     pub fn init(file_path: String, source: String) -> Self {
         let scanner = Scanner::init(file_path.clone(), source.clone());
         Self {
@@ -20,7 +22,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    pub fn compile(&mut self, chunk: &'a mut Chunk) -> bool {
+    pub fn compile(&mut self, chunk: Rc<RefCell<Chunk>>) -> bool {
         self.current_chunk = Some(chunk);
         self.parser.advance();
         self.expression();
@@ -91,6 +93,14 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn string(&mut self) {
+        let previous = self.parser.previous.as_ref().unwrap();
+        let chars = &self.parser.scanner.source[previous.start+1..previous.start+previous.lenght-1];
+        let value = String::from_iter(chars);
+        let obj = Rc::new(RefCell::new(Obj::String(value)));
+        self.emit_constant(Value::Obj(obj));
+    }
+
     fn parse_precedence(&mut self, precedence: Precedence) {
         self.parser.advance();
         let (prefix, _, _) = self.get_rule(&self.parser.previous.clone().unwrap().token_type);
@@ -130,7 +140,7 @@ impl<'a> Compiler<'a> {
             TokenType::Less => (None, Some("binary".to_string()), Precedence::Comparison),
             TokenType::LessEqual => (None, Some("binary".to_string()), Precedence::Comparison),
             TokenType::Identifier => (None, None, Precedence::None),
-            TokenType::String => (None, None, Precedence::None),
+            TokenType::String => (Some("string".to_string()), None, Precedence::None),
             TokenType::Number => (Some("number".to_string()), None, Precedence::None),
             TokenType::And => (None, None, Precedence::None),
             TokenType::Or => (None, None, Precedence::None),
@@ -159,13 +169,14 @@ impl<'a> Compiler<'a> {
             "binary" => self.binary(),
             "number" => self.number(),
             "literal" => self.literal(),
+            "string" => self.string(),
             _ => ()
         }
     }
 
     fn emit_byte(&mut self, byte: u8) {
-        if let Some(chunk) = self.current_chunk.as_mut() {
-            chunk.write(byte, self.parser.previous.as_ref().unwrap().line);
+        if let Some(chunk) = &self.current_chunk {
+            chunk.borrow_mut().write(byte, self.parser.previous.as_ref().unwrap().line);
         }
     }
 
@@ -180,7 +191,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn make_constant(&mut self, value: Value) -> u8 {
-        let constant = self.current_chunk.as_mut().unwrap().add_constant(value);
+        let constant = self.current_chunk.clone().unwrap().borrow_mut().add_constant(value);
         constant as u8
     }
 
