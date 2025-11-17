@@ -17,7 +17,8 @@ impl Compiler {
                 scanner: scanner,
                 current: None,
                 previous: None,
-                had_error: false
+                had_error: false,
+                panic_mode: false
             }
         }
     }
@@ -39,6 +40,9 @@ impl Compiler {
             self.var_declaration();
         } else {
             self.statement();
+        }
+        if self.parser.panic_mode {
+            self.parser.synchronize();
         }
     }
 
@@ -283,7 +287,8 @@ struct Parser {
     scanner: Scanner,
     current: Option<Token>,
     previous: Option<Token>,
-    had_error: bool
+    had_error: bool,
+    panic_mode: bool
 }
 
 impl Parser {
@@ -329,6 +334,10 @@ impl Parser {
     }
 
     fn error_at(&mut self, token: Token, message: &str) {
+        if self.panic_mode {
+            return;
+        }
+        self.panic_mode = true;
         print!("[line {}] Error", token.line);
         if token.token_type == TokenType::Eof {
             print!(" at end");
@@ -340,12 +349,17 @@ impl Parser {
     }
 
     fn error_at_line(&mut self, line: usize, message: String) {
+        if self.panic_mode {
+            return;
+        }
+        self.panic_mode = true;
         print!("[line {}] Error", line);
         println!(": {message}");
         self.had_error = true;
     }
 
     fn synchronize(&mut self) {
+        self.panic_mode = false;
         while let Some(current) = &self.current && current.token_type != TokenType::Eof {
             if self.previous.as_ref().unwrap().token_type == TokenType::Semicolon {
                 return;
