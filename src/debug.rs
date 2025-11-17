@@ -28,6 +28,18 @@ pub fn disassemble_instruction(chunk: Rc<RefCell<Chunk>>, offset: usize) -> usiz
         OpCode::Nil => {
             simple_instruction("OP_NIL", offset)
         },
+        OpCode::Pop => {
+            simple_instruction("OP_POP", offset)
+        },
+        OpCode::GetGlobal => {
+            constant_instruction("OP_GET_GLOBAL", chunk, offset)
+        },
+        OpCode::DefineGlobal => {
+            constant_instruction("OP_DEFINE_GLOBAL", chunk, offset)
+        },
+        OpCode::SetGlobal => {
+            constant_instruction("OP_SET_GLOBAL", chunk, offset)
+        },
         OpCode::Equal => {
             simple_instruction("OP_EQUAL", offset)
         },
@@ -54,6 +66,9 @@ pub fn disassemble_instruction(chunk: Rc<RefCell<Chunk>>, offset: usize) -> usiz
         }
         OpCode::Negate => {
             simple_instruction("OP_NEGATE", offset)
+        }
+        OpCode::Print => {
+            simple_instruction("OP_PRINT", offset)
         }
         OpCode::Return => {
             simple_instruction("OP_RETURN", offset)

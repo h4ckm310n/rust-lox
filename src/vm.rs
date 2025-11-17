@@ -1,11 +1,12 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::{chunk::{Chunk, OpCode}, compiler::Compiler, debug::disassemble_instruction, object::Obj, value::Value};
+use crate::{chunk::{Chunk, OpCode}, compiler::Compiler, debug::disassemble_instruction, object::Obj, value::{Value, print_value}};
 
 pub struct VM {
     ip: u8,
     chunk: Rc<RefCell<Chunk>>,
-    stack: Vec<Value>
+    stack: Vec<Value>,
+    globals: HashMap<String, Value>
 }
 
 impl VM {
@@ -13,7 +14,8 @@ impl VM {
         Self {
             ip: 0,
             chunk: Rc::new(RefCell::new(Chunk::new())),
-            stack: Vec::new()
+            stack: Vec::new(),
+            globals: HashMap::new()
         }
     }
 
@@ -44,6 +46,33 @@ impl VM {
                 }
                 OpCode::False => {
                     self.stack.push(Value::Boolean(false));
+                }
+                OpCode::Pop => {
+                    self.stack.pop();
+                }
+                OpCode::GetGlobal => {
+                    let name = self.read_string();
+                    if let Some(value) = self.globals.get(&name) {
+                        self.stack.push(value.clone());
+                    } else {
+                        self.runtime_error(&format!("Undefined variable {name}."));
+                        return Err(InterpretError::Runtime);
+                    }
+                }
+                OpCode::DefineGlobal => {
+                    let name = self.read_string();
+                    let value = self.peek(0).clone();
+                    self.globals.insert(name, value);
+                    self.stack.pop();
+                }
+                OpCode::SetGlobal => {
+                    let name = self.read_string();
+                    if !self.globals.contains_key(&name) {
+                        self.runtime_error(&format!("Undefined variable {name}."));
+                        return Err(InterpretError::Runtime);
+                    }
+                    let value = self.peek(0).clone();
+                    self.globals.insert(name, value);
                 }
                 OpCode::Equal => {
                     let b = self.stack.pop().unwrap();
@@ -82,8 +111,13 @@ impl VM {
                         return Err(InterpretError::Runtime);
                     }
                 }
+                OpCode::Print => {
+                    let value = self.stack.pop().unwrap();
+                    print_value(value);
+                    println!();
+                }
                 OpCode::Return => {
-                    self.stack.pop();
+                    //self.stack.pop();
                     return Ok(());
                 },
             };
@@ -98,6 +132,10 @@ impl VM {
     fn read_constant(&mut self) -> Value {
         let byte = self.read_byte();
         self.chunk.borrow().constants.values[byte as usize].clone()
+    }
+
+    fn read_string(&mut self) -> String {
+        self.read_constant().to_string()
     }
 
     fn binary_op(&mut self, op: OpCode) -> Result<(), InterpretError> {
