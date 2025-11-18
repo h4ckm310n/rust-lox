@@ -5,7 +5,10 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 pub struct Compiler {
     current_chunk: Option<Rc<RefCell<Chunk>>>,
-    parser: Parser
+    parser: Parser,
+    locals: [Option<Local>; 256],
+    local_count: usize,
+    scope_depth: usize
 }
 
 impl Compiler {
@@ -19,7 +22,10 @@ impl Compiler {
                 previous: None,
                 had_error: false,
                 panic_mode: false
-            }
+            },
+            locals: [const { None }; 256],
+            local_count: 0,
+            scope_depth: 0
         }
     }
 
@@ -60,6 +66,10 @@ impl Compiler {
     fn statement(&mut self) {
         if self.parser.is_match(TokenType::Print) {
             self.print_statement();
+        } else if self.parser.is_match(TokenType::LeftBrace) {
+            self.begin_scope();
+            self.block();
+            self.end_scope();
         } else {
             self.expression_statement();
         }
@@ -69,6 +79,13 @@ impl Compiler {
         self.expression();
         self.parser.consume(TokenType::Semicolon, "Expect ';' after value.");
         self.emit_byte(OpCode::Print.into());
+    }
+
+    fn block(&mut self) {
+        while !self.parser.check(TokenType::RightBrace) && !self.parser.check(TokenType::Eof) {
+            self.declaration();
+        }
+        self.parser.consume(TokenType::RightBrace, "Expect '}' after block.");
     }
 
     fn expression_statement(&mut self) {
@@ -153,13 +170,24 @@ impl Compiler {
     }
 
     fn name_variable(&mut self, name: Token, can_assign: bool) {
-        let arg = self.identifier_constant(name);
+        let get_op;
+        let set_op;
+        let mut arg = self.resolve_local(&name);
+        if arg != -1 {
+            get_op = OpCode::GetLocal;
+            set_op = OpCode::SetLocal;
+        } else {
+            arg = self.identifier_constant(name) as i8;
+            get_op = OpCode::GetGlobal;
+            set_op = OpCode::SetGlobal;
+        }
+        
         if can_assign && self.parser.is_match(TokenType::Equal) {
             self.expression();
-            self.emit_bytes(OpCode::SetGlobal.into(), arg);
+            self.emit_bytes(set_op.into(), arg as u8);
 
         } else {
-            self.emit_bytes(OpCode::GetGlobal.into(), arg);
+            self.emit_bytes(get_op.into(), arg as u8);
         }
     }
 
@@ -169,7 +197,7 @@ impl Compiler {
         let can_assign = precedence.clone() as u8 <= Precedence::Assignment as u8;
         match prefix {
             Some(prefix) => self.parse_by_name(prefix.to_owned(), can_assign),
-            None => self.parser.error_at(self.parser.previous.clone().unwrap(), "Expect expression.")
+            None => self.parser.error("Expect expression.")
         };        
 
         while let (_, _, precedence_) = self.get_rule(&self.parser.current.clone().unwrap().token_type) && (precedence.clone() as u8) <= (precedence_ as u8) {
@@ -186,8 +214,18 @@ impl Compiler {
 
     fn parse_variable(&mut self, error_message: &str) -> u8 {
         self.parser.consume(TokenType::Identifier, error_message);
+        self.declare_variable();
+        if self.scope_depth > 0 {
+            return 0;
+        }
         let previous = self.parser.previous.as_ref().unwrap().clone();
         self.identifier_constant(previous)
+    }
+
+    fn mark_initialized(&mut self) {
+        if let Some(local) = self.locals[self.local_count-1].as_mut() {
+            local.depth = self.scope_depth as i8;
+        }
     }
 
     fn identifier_constant(&mut self, name: Token) -> u8 {
@@ -196,7 +234,56 @@ impl Compiler {
         self.make_constant(Value::Obj(Rc::new(RefCell::new(Obj::String(value)))))
     }
 
+    fn identifiers_equal(&self, a: &Token, b: &Token) -> bool {
+        *a == *b
+    }
+
+    fn resolve_local(&mut self, name: &Token) -> i8 {
+        for i in (0..self.local_count).rev() {
+            let local = self.locals[i].as_ref().unwrap();
+            if self.identifiers_equal(name, &local.name) {
+                if local.depth == -1 {
+                    self.parser.error("Can't read local variable in its own initializer.");
+                }
+                return i as i8;
+            }
+        }
+        -1
+    }
+
+    fn declare_variable(&mut self) {
+        if self.scope_depth == 0 {
+            return;
+        }
+        let name = self.parser.previous.as_ref().unwrap().clone();
+        for i in (0..self.local_count).rev() {
+            let local = *&self.locals[i].as_ref().unwrap();
+            if local.depth != -1 && local.depth < self.scope_depth as i8 {
+                break;
+            }
+            
+            if self.identifiers_equal(&name, &local.name) {
+                self.parser.error("Already a variable with this name in this scope.");
+            }
+        }
+        self.add_local(name);
+    }
+
+    fn add_local(&mut self, name: Token) {
+        if self.local_count == 256 {
+            self.parser.error("Too many local variables in function.");
+            return;
+        }
+        let local = Local{ name: name, depth: -1 };
+        self.locals[self.local_count] = Some(local);
+        self.local_count += 1;
+    }
+
     fn define_variable(&mut self, global: u8) {
+        if self.scope_depth > 0 {
+            self.mark_initialized();
+            return;
+        }
         self.emit_bytes(OpCode::DefineGlobal.into(), global);
     }
 
@@ -278,6 +365,18 @@ impl Compiler {
         constant as u8
     }
 
+    fn begin_scope(&mut self) {
+        self.scope_depth += 1;
+    }
+
+    fn end_scope(&mut self) {
+        self.scope_depth -= 1;
+        while self.local_count > 0 && self.locals[self.local_count-1].as_ref().unwrap().depth > self.scope_depth as i8 {
+            self.emit_byte(OpCode::Pop.into());
+            self.local_count -= 1;
+        }
+    }
+
     fn end(&mut self) {
         self.emit_byte(OpCode::Return.into());
     }
@@ -329,6 +428,11 @@ impl Parser {
     }
 
     fn error_at_current(&mut self, message: &str) {
+        let current = self.current.clone();
+        self.error_at(current.unwrap(), message);
+    }
+
+    fn error(&mut self, message: &str) {
         let previous = self.previous.clone();
         self.error_at(previous.unwrap(), message);
     }
@@ -391,4 +495,10 @@ enum Precedence {
     Unary,
     Call,
     Primary
+}
+
+#[derive(Clone)]
+struct Local {
+    name: Token,
+    depth: i8
 }

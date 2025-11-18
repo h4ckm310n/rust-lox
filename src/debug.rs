@@ -31,6 +31,12 @@ pub fn disassemble_instruction(chunk: Rc<RefCell<Chunk>>, offset: usize) -> usiz
         OpCode::Pop => {
             simple_instruction("OP_POP", offset)
         },
+        OpCode::GetLocal => {
+            byte_instruction("OP_GET_LOCAL", chunk, offset)
+        },
+        OpCode::SetLocal => {
+            byte_instruction("OP_SET_LOCAL", chunk, offset)
+        },
         OpCode::GetGlobal => {
             constant_instruction("OP_GET_GLOBAL", chunk, offset)
         },
@@ -86,5 +92,11 @@ fn constant_instruction(name: &str, chunk: Rc<RefCell<Chunk>>, offset: usize) ->
     print!("{name} {constant}");
     print_value(chunk.borrow().constants.values[constant].clone());
     println!();
+    offset + 2
+}
+
+fn byte_instruction(name: &str, chunk: Rc<RefCell<Chunk>>, offset: usize) -> usize {
+    let slot = chunk.borrow().codes[offset+1];
+    println!("{name} {slot}");
     offset + 2
 }

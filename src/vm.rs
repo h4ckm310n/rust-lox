@@ -50,6 +50,14 @@ impl VM {
                 OpCode::Pop => {
                     self.stack.pop();
                 }
+                OpCode::GetLocal => {
+                    let slot = self.read_byte();
+                    self.stack.push(self.stack[slot as usize].clone());
+                }
+                OpCode::SetLocal => {
+                    let slot = self.read_byte();
+                    self.stack[slot as usize] = self.peek(0).clone();
+                }
                 OpCode::GetGlobal => {
                     let name = self.read_string();
                     if let Some(value) = self.globals.get(&name) {
