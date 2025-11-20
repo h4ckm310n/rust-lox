@@ -124,6 +124,20 @@ impl VM {
                     print_value(value);
                     println!();
                 }
+                OpCode::Jump => {
+                    let offset = self.read_short();
+                    self.ip += offset as u8;
+                }
+                OpCode::JumpIfFalse => {
+                    let offset = self.read_short();
+                    if is_falsey(self.peek(0)) {
+                        self.ip += offset as u8;
+                    }
+                }
+                OpCode::Loop => {
+                    let offset = self.read_short();
+                    self.ip -= offset as u8;
+                }
                 OpCode::Return => {
                     //self.stack.pop();
                     return Ok(());
@@ -140,6 +154,11 @@ impl VM {
     fn read_constant(&mut self) -> Value {
         let byte = self.read_byte();
         self.chunk.borrow().constants.values[byte as usize].clone()
+    }
+
+    fn read_short(&mut self) -> u16 {
+        self.ip += 2;
+        (((self.ip-2) << 8) | (self.ip-1)) as u16
     }
 
     fn read_string(&mut self) -> String {

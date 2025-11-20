@@ -76,6 +76,15 @@ pub fn disassemble_instruction(chunk: Rc<RefCell<Chunk>>, offset: usize) -> usiz
         OpCode::Print => {
             simple_instruction("OP_PRINT", offset)
         }
+        OpCode::Jump => {
+            jump_instruction("OP_JUMP", 1, chunk, offset)
+        }
+        OpCode::JumpIfFalse => {
+            jump_instruction("OP_JUMP_IF_FALSE", 1, chunk, offset)
+        }
+        OpCode::Loop => {
+            jump_instruction("OP_LOOP", -1, chunk, offset)
+        }
         OpCode::Return => {
             simple_instruction("OP_RETURN", offset)
         }
@@ -99,4 +108,11 @@ fn byte_instruction(name: &str, chunk: Rc<RefCell<Chunk>>, offset: usize) -> usi
     let slot = chunk.borrow().codes[offset+1];
     println!("{name} {slot}");
     offset + 2
+}
+
+fn jump_instruction(name: &str, sign: i8, chunk: Rc<RefCell<Chunk>>, offset: usize) -> usize {
+    let mut jump = (chunk.borrow().codes[offset+1] << 8) as i16;
+    jump |= chunk.borrow().codes[offset+2] as i16;
+    println!("{name} {offset} -> {}", (offset as i16 + 3 + sign as i16 * jump) as u16);
+    offset + 3
 }
