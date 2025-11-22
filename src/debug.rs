@@ -12,61 +12,61 @@ pub fn disassemble_chunk(chunk: Rc<RefCell<Chunk>>, name: String) {
 }
 
 pub fn disassemble_instruction(chunk: Rc<RefCell<Chunk>>, offset: usize) -> usize {
-    print!("{offset}");
-    print!("{}", chunk.borrow().lines[offset]);
+    print!("{offset} ");
+    print!("{} ", chunk.borrow().lines[offset]);
     let instruction: Result<OpCode, _> = chunk.borrow().codes[offset].try_into();
     match instruction.unwrap() {
         OpCode::Constant => {
             constant_instruction("OP_CONSTANT", chunk, offset)
-        },
+        }
         OpCode::True => {
             simple_instruction("OP_TRUE", offset)
-        },
+        }
         OpCode::False => {
             simple_instruction("OP_FALSE", offset)
-        },
+        }
         OpCode::Nil => {
             simple_instruction("OP_NIL", offset)
-        },
+        }
         OpCode::Pop => {
             simple_instruction("OP_POP", offset)
-        },
+        }
         OpCode::GetLocal => {
             byte_instruction("OP_GET_LOCAL", chunk, offset)
-        },
+        }
         OpCode::SetLocal => {
             byte_instruction("OP_SET_LOCAL", chunk, offset)
-        },
+        }
         OpCode::GetGlobal => {
             constant_instruction("OP_GET_GLOBAL", chunk, offset)
-        },
+        }
         OpCode::DefineGlobal => {
             constant_instruction("OP_DEFINE_GLOBAL", chunk, offset)
-        },
+        }
         OpCode::SetGlobal => {
             constant_instruction("OP_SET_GLOBAL", chunk, offset)
-        },
+        }
         OpCode::Equal => {
             simple_instruction("OP_EQUAL", offset)
-        },
+        }
         OpCode::Greater => {
             simple_instruction("OP_GREATER", offset)
-        },
+        }
         OpCode::Less => {
             simple_instruction("OP_LESS", offset)
-        },
+        }
         OpCode::Add => {
             simple_instruction("OP_ADD", offset)
-        },
+        }
         OpCode::Subtract => {
             simple_instruction("OP_SUBTRACT", offset)
-        },
+        }
         OpCode::Multiply => {
             simple_instruction("OP_MULTIPLY", offset)
-        },
+        }
         OpCode::Divide => {
             simple_instruction("OP_DIVIDE", offset)
-        },
+        }
         OpCode::Not => {
             simple_instruction("OP_NOT", offset)
         }
@@ -98,7 +98,7 @@ fn simple_instruction(name: &str, offset: usize) -> usize {
 
 fn constant_instruction(name: &str, chunk: Rc<RefCell<Chunk>>, offset: usize) -> usize {
     let constant = chunk.borrow().codes[offset+1] as usize;
-    print!("{name} {constant}");
+    print!("{name} {constant} ");
     print_value(chunk.borrow().constants.values[constant].clone());
     println!();
     offset + 2
@@ -111,7 +111,7 @@ fn byte_instruction(name: &str, chunk: Rc<RefCell<Chunk>>, offset: usize) -> usi
 }
 
 fn jump_instruction(name: &str, sign: i8, chunk: Rc<RefCell<Chunk>>, offset: usize) -> usize {
-    let mut jump = (chunk.borrow().codes[offset+1] << 8) as i16;
+    let mut jump = ((chunk.borrow().codes[offset+1] as u32) << 8) as i16;
     jump |= chunk.borrow().codes[offset+2] as i16;
     println!("{name} {offset} -> {}", (offset as i16 + 3 + sign as i16 * jump) as u16);
     offset + 3

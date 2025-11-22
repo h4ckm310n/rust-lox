@@ -77,10 +77,11 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
             Self::Nil => write!(f, "nil"),
+            Self::Boolean(boolean) => write!(f, "{boolean}"),
+            Self::Number(number) => write!(f, "{number}"),
             Self::Obj(obj) => match &*obj.borrow() {
                 Obj::String(string) => write!(f, "{string}"),
             }
-            _ => write!(f, "{self}")
         }
     }
 }

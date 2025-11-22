@@ -6,6 +6,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let files = collect_files(PathBuf::from(args[1].clone()));
     for (path, content) in files {
+        //println!("{}", path.to_string_lossy());
         let mut vm = VM::init();
         vm.interpret(path.to_string_lossy().to_string(), content.clone());
     }

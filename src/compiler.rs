@@ -6,7 +6,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 pub struct Compiler {
     current_chunk: Option<Rc<RefCell<Chunk>>>,
     parser: Parser,
-    locals: [Option<Local>; 256],
+    locals: [Option<Local>; u8::MAX as usize + 1],
     local_count: usize,
     scope_depth: usize
 }
@@ -23,7 +23,7 @@ impl Compiler {
                 had_error: false,
                 panic_mode: false
             },
-            locals: [const { None }; 256],
+            locals: [const { None }; u8::MAX as usize + 1],
             local_count: 0,
             scope_depth: 0
         }
@@ -35,8 +35,6 @@ impl Compiler {
         while !self.parser.is_match(TokenType::Eof) {
             self.declaration();
         }
-        //self.expression();
-        //self.parser.consume(TokenType::Eof, "Expect end of expression.");
         self.end();
         !self.parser.had_error
     }
@@ -182,7 +180,7 @@ impl Compiler {
     fn number(&mut self) {
         let token = self.parser.previous.clone().unwrap();
         if token.token_type == TokenType::Number {
-            let chars = &self.parser.scanner.source[token.start..token.start+token.lenght];
+            let chars = &self.parser.scanner.source[token.start..token.start+token.length];
             let value = String::from_iter(chars).parse::<f64>();
             if let Ok(value) = value {
                 self.emit_constant(Value::Number(value));
@@ -239,7 +237,7 @@ impl Compiler {
 
     fn string(&mut self) {
         let previous = self.parser.previous.as_ref().unwrap();
-        let chars = &self.parser.scanner.source[previous.start+1..previous.start+previous.lenght-1];
+        let chars = &self.parser.scanner.source[previous.start+1..previous.start+previous.length-1];
         let value = String::from_iter(chars);
         let obj = Rc::new(RefCell::new(Obj::String(value)));
         self.emit_constant(Value::Obj(obj));
@@ -247,10 +245,10 @@ impl Compiler {
 
     fn variable(&mut self, can_assign: bool) {
         let previous = self.parser.previous.as_ref().unwrap().clone();
-        self.name_variable(previous, can_assign);
+        self.named_variable(previous, can_assign);
     }
 
-    fn name_variable(&mut self, name: Token, can_assign: bool) {
+    fn named_variable(&mut self, name: Token, can_assign: bool) {
         let get_op;
         let set_op;
         let mut arg = self.resolve_local(&name);
@@ -289,7 +287,7 @@ impl Compiler {
             }
         }
         if can_assign && self.parser.is_match(TokenType::Equal) {
-            self.parser.error_at_current("Invalid assignment target.");
+            self.parser.error("Invalid assignment target.");
         }
     }
 
@@ -310,13 +308,13 @@ impl Compiler {
     }
 
     fn identifier_constant(&mut self, name: Token) -> u8 {
-        let chars = &self.parser.scanner.source[name.start..name.start+name.lenght];
+        let chars = &self.parser.scanner.source[name.start..name.start+name.length];
         let value = String::from_iter(chars);
         self.make_constant(Value::Obj(Rc::new(RefCell::new(Obj::String(value)))))
     }
 
     fn identifiers_equal(&self, a: &Token, b: &Token) -> bool {
-        *a == *b
+        self.parser.scanner.source[a.start..a.start+a.length] == self.parser.scanner.source[b.start..b.start+b.length]
     }
 
     fn resolve_local(&mut self, name: &Token) -> i8 {
@@ -351,7 +349,7 @@ impl Compiler {
     }
 
     fn add_local(&mut self, name: Token) {
-        if self.local_count == 256 {
+        if self.local_count == u8::MAX as usize + 1 {
             self.parser.error("Too many local variables in function.");
             return;
         }
@@ -397,7 +395,7 @@ impl Compiler {
             TokenType::Semicolon => (None, None, Precedence::None),
             TokenType::Slash => (None, Some("binary".to_string()), Precedence::Factor),
             TokenType::Star => (None, Some("binary".to_string()), Precedence::Factor),
-            TokenType::Bang => (Some("binary".to_string()), None, Precedence::None),
+            TokenType::Bang => (Some("unary".to_string()), None, Precedence::None),
             TokenType::BangEqual => (None, Some("binary".to_string()), Precedence::Equality),
             TokenType::Equal => (None, None, Precedence::None),
             TokenType::EqualEqual => (None, Some("binary".to_string()), Precedence::Equality),
@@ -464,7 +462,7 @@ impl Compiler {
     fn emit_loop(&mut self, loop_start: usize) {
         self.emit_byte(OpCode::Loop.into());
         let offset = self.current_chunk.as_ref().unwrap().borrow().codes.len() - loop_start + 2;
-        if offset > 65535 {
+        if offset > u16::MAX as usize {
             self.parser.error("Loop body too large.");
         }
         self.emit_byte(((offset >> 8) & 0xff) as u8);
@@ -478,10 +476,10 @@ impl Compiler {
 
     fn patch_jump(&mut self, offset: usize) {
         let jump = self.current_chunk.as_ref().unwrap().borrow().codes.len() - offset - 2;
-        if jump > 65535 {
+        if jump > u16::MAX as usize {
             self.parser.error("Too much code to jump over.");
         }
-        self.current_chunk.as_ref().unwrap().borrow_mut().codes[offset] = (jump as u8 >> 8) & 0xff;
+        self.current_chunk.as_ref().unwrap().borrow_mut().codes[offset] = ((jump as u32 >> 8) & 0xff) as u8;
         self.current_chunk.as_ref().unwrap().borrow_mut().codes[offset+1] = jump as u8 & 0xff;
     }
 
@@ -571,7 +569,7 @@ impl Parser {
         if token.token_type == TokenType::Eof {
             print!(" at end");
         } else {
-            print!("at {} {}", token.lenght, token.start);
+            print!(" at {} {}", token.length, token.start);
         }
         println!(": {message}");
         self.had_error = true;

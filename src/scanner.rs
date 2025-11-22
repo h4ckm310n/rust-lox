@@ -90,7 +90,7 @@ impl Scanner {
         let token = Token {
             token_type: token_type,
             start: self.start,
-            lenght: self.current - self.start,
+            length: self.current - self.start,
             line: self.line,
         };
         token
@@ -189,14 +189,6 @@ impl Scanner {
             self.advance();
         }
 
-        // check keyword
-        /*let text = self.source.get(self.start..self.current).unwrap();
-        for (keyword, keyword_type) in KEYWORDS {
-            if keyword == text {
-                self.add_token(keyword_type, None);
-                return;
-            }
-        }*/
         self.make_token(self.get_identifier_type())
     }
 
@@ -239,7 +231,7 @@ impl Scanner {
 
     fn check_keyword(&self, start: usize, length: usize, rest: &str, token_type: TokenType) -> TokenType {
         if self.current - self.start == start + length &&
-           self.source[self.start+start..self.start+length] == rest.chars().collect::<Vec<char>>() {
+           self.source[self.start+start..self.start+start+length] == rest.chars().collect::<Vec<char>>() {
             return token_type;
         }
         TokenType::Identifier
@@ -250,11 +242,11 @@ impl Scanner {
 pub struct Token {
     pub token_type: TokenType,
     pub start: usize,
-    pub lenght: usize,
+    pub length: usize,
     pub line: usize
 }
 
-#[derive(PartialEq, Clone, Eq, Hash)]
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum TokenType {
     LeftParen, RightParen,
     LeftBrace, RightBrace,

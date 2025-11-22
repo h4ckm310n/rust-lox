@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use crate::{chunk::{Chunk, OpCode}, compiler::Compiler, debug::disassemble_instruction, object::Obj, value::{Value, print_value}};
 
 pub struct VM {
-    ip: u8,
+    ip: usize,
     chunk: Rc<RefCell<Chunk>>,
     stack: Vec<Value>,
     globals: HashMap<String, Value>
@@ -28,19 +28,19 @@ impl VM {
         if !compiler.compile(self.chunk.clone()) {
             return Err(InterpretError::Compile);
         }
-        self.ip = self.chunk.borrow().codes[0];
+        self.ip = 0;
         self.run()
     }
 
     fn run(&mut self) -> Result<(), InterpretError> {
         loop {
-            disassemble_instruction(self.chunk.clone(), self.ip as usize);
+            disassemble_instruction(self.chunk.clone(), self.ip);
             let instruction: Result<OpCode, _> = self.read_byte().try_into();
             match instruction.unwrap() {
                 OpCode::Constant => {
                     let constant = self.read_constant();
                     self.stack.push(constant);
-                },
+                }
                 OpCode::True => {
                     self.stack.push(Value::Boolean(true));
                 }
@@ -104,11 +104,11 @@ impl VM {
                 }
                 op @ (OpCode::Greater | OpCode::Less | OpCode::Subtract | OpCode::Multiply | OpCode::Divide) => {
                     self.binary_op(op)?;
-                },
+                }
                 OpCode::Not => {
                     let value = self.stack.pop().unwrap();
                     self.stack.push(Value::Boolean(is_falsey(&value)));
-                },
+                }
                 OpCode::Negate => {
                     let value = self.stack.last().unwrap();
                     if let Some(number) = value.as_number() {
@@ -126,29 +126,29 @@ impl VM {
                 }
                 OpCode::Jump => {
                     let offset = self.read_short();
-                    self.ip += offset as u8;
+                    self.ip += offset as usize;
                 }
                 OpCode::JumpIfFalse => {
                     let offset = self.read_short();
                     if is_falsey(self.peek(0)) {
-                        self.ip += offset as u8;
+                        self.ip += offset as usize;
                     }
                 }
                 OpCode::Loop => {
                     let offset = self.read_short();
-                    self.ip -= offset as u8;
+                    self.ip -= offset as usize;
                 }
                 OpCode::Return => {
                     //self.stack.pop();
                     return Ok(());
-                },
+                }
             };
         }
     }
 
     fn read_byte(&mut self) -> u8 {
         self.ip += 1;
-        self.ip
+        self.chunk.borrow().codes[self.ip - 1]
     }
 
     fn read_constant(&mut self) -> Value {
@@ -158,7 +158,7 @@ impl VM {
 
     fn read_short(&mut self) -> u16 {
         self.ip += 2;
-        (((self.ip-2) << 8) | (self.ip-1)) as u16
+        ((((self.chunk.borrow().codes[self.ip - 2]) as u32) << 8) | (self.chunk.borrow().codes[self.ip-1]) as u32) as u16
     }
 
     fn read_string(&mut self) -> String {
@@ -190,8 +190,8 @@ impl VM {
         self.stack.push(Value::Obj(Rc::new(RefCell::new(Obj::String(a + &b)))));
     }
 
-    fn peek(&mut self, distance: i8) -> &Value {
-        &self.stack[(-1-distance) as usize]
+    fn peek(&mut self, distance: usize) -> &Value {
+        &self.stack[self.stack.len() - 1 - distance]
     }
 
     fn runtime_error(&mut self, message: &str) {
