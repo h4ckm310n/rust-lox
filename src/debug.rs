@@ -85,6 +85,9 @@ pub fn disassemble_instruction(chunk: Rc<RefCell<Chunk>>, offset: usize) -> usiz
         OpCode::Loop => {
             jump_instruction("OP_LOOP", -1, chunk, offset)
         }
+        OpCode::Call => {
+            byte_instruction("OP_CALL", chunk, offset)
+        }
         OpCode::Return => {
             simple_instruction("OP_RETURN", offset)
         }
@@ -99,7 +102,7 @@ fn simple_instruction(name: &str, offset: usize) -> usize {
 fn constant_instruction(name: &str, chunk: Rc<RefCell<Chunk>>, offset: usize) -> usize {
     let constant = chunk.borrow().codes[offset+1] as usize;
     print!("{name} {constant} ");
-    print_value(chunk.borrow().constants.values[constant].clone());
+    print_value(Rc::new(chunk.borrow().constants.values[constant].clone()));
     println!();
     offset + 2
 }

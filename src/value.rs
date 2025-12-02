@@ -1,6 +1,6 @@
 use std::{cell::RefCell, fmt, rc::Rc};
 
-use crate::object::Obj;
+use crate::object::{Function, NativeFn, Obj};
 
 #[derive(Clone)]
 pub enum Value {
@@ -35,6 +35,24 @@ impl Value {
         }
     }
 
+    pub fn as_function(&self) -> Option<Rc<RefCell<Function>>> {
+        if let Some(obj) = self.as_obj() &&
+           let Obj::Function(function) = &*obj.borrow() {
+            Some(function.clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn as_native(&self) -> Option<Rc<NativeFn>> {
+        if let Some(obj) = self.as_obj() &&
+           let Obj::NativeFn(native_fn) = &*obj.borrow() {
+            Some(native_fn.clone())
+        } else {
+            None
+        }
+    }
+
     pub fn as_string(&self) -> Option<String> {
         if let Some(obj) = self.as_obj() &&
            let Obj::String(string) = &*obj.borrow() {
@@ -64,12 +82,20 @@ impl Value {
         self.as_obj().is_some()
     }
 
+    pub fn is_function(&self) -> bool {
+        self.as_function().is_some()
+    }
+
+    pub fn is_native(&self) -> bool {
+        self.as_native().is_some()
+    }
+
     pub fn is_string(&self) -> bool {
         self.as_string().is_some()
     }
 }
 
-pub fn print_value(value: Value) {
+pub fn print_value(value: Rc<Value>) {
     print!("{value}");
 }
 
@@ -80,6 +106,8 @@ impl fmt::Display for Value {
             Self::Boolean(boolean) => write!(f, "{boolean}"),
             Self::Number(number) => write!(f, "{number}"),
             Self::Obj(obj) => match &*obj.borrow() {
+                Obj::Function(function) => write!(f, "{}", function.borrow()),
+                Obj::NativeFn(_) => write!(f, "<native fn>"),
                 Obj::String(string) => write!(f, "{string}"),
             }
         }
@@ -96,7 +124,9 @@ impl PartialEq for Value {
             (Self::Number(l0), Self::Number(r0)) => l0 == r0,
             (Self::Obj(l0), Self::Obj(r0)) => {
                 match (&*l0.borrow(), &*r0.borrow()) {
-                    (Obj::String(l0), Obj::String(r0)) => *l0 == *r0
+                    (Obj::Function(l0), Obj::Function(r0)) => *l0 == *r0,
+                    (Obj::String(l0), Obj::String(r0)) => *l0 == *r0,
+                    _ => false
                 }
             },
             _ => false,

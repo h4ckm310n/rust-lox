@@ -1,5 +1,5 @@
 pub struct Scanner {
-    file_path: String,
+    pub file_path: String,
     pub source: Vec<char>,
     start: usize,
     current: usize,

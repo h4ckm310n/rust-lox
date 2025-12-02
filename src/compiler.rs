@@ -1,76 +1,116 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::{Rc, Weak}, sync::{Mutex, OnceLock}};
 
-use crate::{chunk::{Chunk, OpCode}, object::Obj, scanner::{Scanner, Token, TokenType}, value::Value};
+use crate::{chunk::{Chunk, OpCode}, object::{Function, Obj}, scanner::{Scanner, Token, TokenType}, value::Value};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 pub struct Compiler {
-    current_chunk: Option<Rc<RefCell<Chunk>>>,
-    parser: Parser,
+    weak_self: Option<Weak<RefCell<Self>>>,
+    enclosing: Option<Rc<RefCell<Compiler>>>,
+    function: Rc<RefCell<Function>>,
+    function_type: FunctionType,
+    //parser: Rc<RefCell<Parser>>,
     locals: [Option<Local>; u8::MAX as usize + 1],
     local_count: usize,
     scope_depth: usize
 }
 
 impl Compiler {
-    pub fn init(file_path: String, source: String) -> Self {
-        let scanner = Scanner::init(file_path.clone(), source.clone());
+    pub fn new(file_path: String, source: String, function_type: FunctionType, enclosing: Option<Rc<RefCell<Compiler>>>) -> Self {
+        if enclosing.is_none() {
+            Parser::instance().lock().unwrap().init(file_path, source);
+        }
         Self {
-            current_chunk: None,
-            parser: Parser{
-                scanner: scanner,
-                current: None,
-                previous: None,
-                had_error: false,
-                panic_mode: false
-            },
+            weak_self: None,
+            enclosing: enclosing,
+            function: Rc::new(RefCell::new(Function::new())),
+            function_type: function_type,
+            //parser: parser,
             locals: [const { None }; u8::MAX as usize + 1],
             local_count: 0,
             scope_depth: 0
         }
     }
 
-    pub fn compile(&mut self, chunk: Rc<RefCell<Chunk>>) -> bool {
-        self.current_chunk = Some(chunk);
-        self.parser.advance();
-        while !self.parser.is_match(TokenType::Eof) {
+    pub fn init(&mut self) {
+        if self.function_type != FunctionType::Script {
+            let parser = Parser::instance().lock().unwrap();
+            let previous = parser.previous.clone().unwrap();
+            let chars = &parser.scanner.source[previous.start..previous.start+previous.length];
+            self.function.borrow_mut().name = String::from_iter(chars);
+        }
+        self.locals[0] = Some(Local {
+            name: Token { token_type: TokenType::Nil, start: 0, length: 0, line: 0 },
+            depth: 0
+        });
+        self.local_count += 1;
+    }
+
+    pub fn set_weak_self(&mut self, weak_self: Weak<RefCell<Self>>) {
+        self.weak_self = Some(weak_self);
+    }
+
+    pub fn compile(&mut self) -> Option<Rc<RefCell<Function>>> {
+        Parser::instance().lock().unwrap().advance();
+        loop {
+            let is_match = {
+                Parser::instance().lock().unwrap().is_match(TokenType::Eof)
+            };
+            if is_match {
+                break;
+            }
             self.declaration();
         }
-        self.end();
-        !self.parser.had_error
+        let function = self.end();
+        if Parser::instance().lock().unwrap().had_error {
+            None
+        } else {
+            Some(function)
+        }
     }
 
     fn declaration(&mut self) {
-        if self.parser.is_match(TokenType::Var) {
+        if { Parser::instance().lock().unwrap().is_match(TokenType::Fun) } {
+            self.fun_declaration();
+        } else if { Parser::instance().lock().unwrap().is_match(TokenType::Var) } {
             self.var_declaration();
         } else {
             self.statement();
         }
-        if self.parser.panic_mode {
-            self.parser.synchronize();
+        if { Parser::instance().lock().unwrap().panic_mode } {
+            Parser::instance().lock().unwrap().synchronize();
         }
+    }
+
+    fn fun_declaration(&mut self) {
+        let global = self.parse_variable("Expect function name.");
+        self.mark_initialized();
+        self.function(FunctionType::Function);
+        self.define_variable(global);
     }
 
     fn var_declaration(&mut self) {
         let global = self.parse_variable("Expect variable name.");
-        if self.parser.is_match(TokenType::Equal) {
+        if { Parser::instance().lock().unwrap().is_match(TokenType::Equal) } {
             self.expression();
         } else {
             self.emit_byte(OpCode::Nil.into());
         }
-        self.parser.consume(TokenType::Semicolon, "Expect ';' after variable declaration.");
+        Parser::instance().lock().unwrap().consume(TokenType::Semicolon, "Expect ';' after variable declaration.");
         self.define_variable(global);
     }
 
     fn statement(&mut self) {
-        if self.parser.is_match(TokenType::Print) {
+        if { Parser::instance().lock().unwrap().is_match(TokenType::Print) } {
             self.print_statement();
-        } else if self.parser.is_match(TokenType::If) {
+        } else if { Parser::instance().lock().unwrap().is_match(TokenType::Return) } {
+            self.return_statement();
+        } else if { Parser::instance().lock().unwrap().is_match(TokenType::If) } {
             self.if_statement();
-        } else if self.parser.is_match(TokenType::While) {
+        } else if { Parser::instance().lock().unwrap().is_match(TokenType::While) } {
             self.while_statement();
-        } else if self.parser.is_match(TokenType::For) {
+        } else if { Parser::instance().lock().unwrap().is_match(TokenType::For) } {
             self.for_statement();
-        } else if self.parser.is_match(TokenType::LeftBrace) {
+        } else if { Parser::instance().lock().unwrap().is_match(TokenType::LeftBrace) } {
             self.begin_scope();
             self.block();
             self.end_scope();
@@ -81,27 +121,87 @@ impl Compiler {
 
     fn print_statement(&mut self) {
         self.expression();
-        self.parser.consume(TokenType::Semicolon, "Expect ';' after value.");
+        Parser::instance().lock().unwrap().consume(TokenType::Semicolon, "Expect ';' after value.");
         self.emit_byte(OpCode::Print.into());
     }
 
+    fn return_statement(&mut self) {
+        if self.function_type == FunctionType::Script {
+            Parser::instance().lock().unwrap().error("Can't return from top-level code.");
+        }
+        if { Parser::instance().lock().unwrap().is_match(TokenType::Semicolon) } {
+            self.emit_return();
+        } else {
+            self.expression();
+            Parser::instance().lock().unwrap().consume(TokenType::Semicolon, "Expect ';' after return value.");
+            self.emit_byte(OpCode::Return.into());
+        }
+    }
+
     fn block(&mut self) {
-        while !self.parser.check(TokenType::RightBrace) && !self.parser.check(TokenType::Eof) {
+        loop {
+            let check = {
+                let parser = Parser::instance().lock().unwrap();
+                !parser.check(TokenType::RightBrace) && !parser.check(TokenType::Eof)
+            };
+            if !check {
+                break;
+            }
+
             self.declaration();
         }
-        self.parser.consume(TokenType::RightBrace, "Expect '}' after block.");
+        Parser::instance().lock().unwrap().consume(TokenType::RightBrace, "Expect '}' after block.");
+    }
+
+    fn function(&mut self, function_type: FunctionType) {
+        let file_path = {
+            Parser::instance().lock().unwrap().scanner.file_path.clone()
+        };
+        let source = {
+            String::from_iter(Parser::instance().lock().unwrap().scanner.source.clone())
+        };
+        let _self = self.weak_self.as_ref().unwrap().upgrade().unwrap();
+        let compiler = Rc::new(RefCell::new(
+            Compiler::new(file_path, source, function_type, Some(_self.clone()))
+        ));
+        compiler.borrow_mut().set_weak_self(Rc::downgrade(&compiler));
+        compiler.borrow_mut().init();
+        compiler.borrow_mut().begin_scope();
+        Parser::instance().lock().unwrap().consume(TokenType::LeftParen, "Expect '(' after function name.");
+        if { !Parser::instance().lock().unwrap().check(TokenType::RightParen) } {
+            loop {
+                compiler.borrow_mut().function.borrow_mut().arity += 1;
+                if compiler.borrow_mut().function.borrow().arity > u8::MAX as usize {
+                    Parser::instance().lock().unwrap().error_at_current("Can't have more than 255 parameters.");
+                }
+                let constant = compiler.borrow_mut().parse_variable("Expect parameter name.");
+                compiler.borrow_mut().define_variable(constant);
+                if { !Parser::instance().lock().unwrap().is_match(TokenType::Comma) } {
+                    break;
+                }
+            }
+        }
+        {
+            let mut parser = Parser::instance().lock().unwrap();
+            parser.consume(TokenType::RightParen, "Expect ')' after parameters.");
+            parser.consume(TokenType::LeftBrace, "Expect '{' before function body.");
+        }
+        compiler.borrow_mut().block();
+        let function = compiler.borrow_mut().end();
+        let value = self.make_constant(Value::Obj(Rc::new(RefCell::new(Obj::Function(function)))));
+        self.emit_bytes(OpCode::Constant.into(), value);
     }
 
     fn expression_statement(&mut self) {
         self.expression();
-        self.parser.consume(TokenType::Semicolon, "Expect ';' after expression.");
+        Parser::instance().lock().unwrap().consume(TokenType::Semicolon, "Expect ';' after expression.");
         self.emit_byte(OpCode::Pop.into());
     }
 
     fn if_statement(&mut self) {
-        self.parser.consume(TokenType::LeftParen, "Expect '(' after 'if'.");
+        Parser::instance().lock().unwrap().consume(TokenType::LeftParen, "Expect '(' after 'if'.");
         self.expression();
-        self.parser.consume(TokenType::RightParen, "Expect ')' after condition.");
+        Parser::instance().lock().unwrap().consume(TokenType::RightParen, "Expect ')' after condition.");
         let then_jump = self.emit_jump(OpCode::JumpIfFalse.into());
         self.emit_byte(OpCode::Pop.into());
         self.statement();
@@ -109,17 +209,17 @@ impl Compiler {
         self.patch_jump(then_jump);
         self.emit_byte(OpCode::Pop.into());
         
-        if self.parser.is_match(TokenType::Else) {
+        if { Parser::instance().lock().unwrap().is_match(TokenType::Else) } {
             self.statement();
         }
         self.patch_jump(else_jump);
     }
 
     fn while_statement(&mut self) {
-        let loop_start = self.current_chunk.as_ref().unwrap().borrow().codes.len();
-        self.parser.consume(TokenType::LeftParen, "Expect '(' after 'while'.");
+        let loop_start = self.function.borrow().chunk.borrow().codes.len();
+        Parser::instance().lock().unwrap().consume(TokenType::LeftParen, "Expect '(' after 'while'.");
         self.expression();
-        self.parser.consume(TokenType::RightParen, "Expect ')' after condition.");
+        Parser::instance().lock().unwrap().consume(TokenType::RightParen, "Expect ')' after condition.");
 
         let exit_jump = self.emit_jump(OpCode::JumpIfFalse.into());
         self.emit_byte(OpCode::Pop.into());
@@ -132,30 +232,30 @@ impl Compiler {
 
     fn for_statement(&mut self) {
         self.begin_scope();
-        self.parser.consume(TokenType::LeftParen, "Expect '(' after 'for'.");
-        if self.parser.is_match(TokenType::Semicolon) {
+        Parser::instance().lock().unwrap().consume(TokenType::LeftParen, "Expect '(' after 'for'.");
+        if { Parser::instance().lock().unwrap().is_match(TokenType::Semicolon) } {
 
-        } else if self.parser.is_match(TokenType::Var) {
+        } else if { Parser::instance().lock().unwrap().is_match(TokenType::Var) } {
             self.var_declaration();
         } else {
             self.expression_statement();
         }
 
-        let mut loop_start = self.current_chunk.as_ref().unwrap().borrow().codes.len();
+        let mut loop_start = self.function.borrow().chunk.borrow().codes.len();
         let mut exit_jump = -1;
-        if !self.parser.is_match(TokenType::Semicolon) {
+        if { !Parser::instance().lock().unwrap().is_match(TokenType::Semicolon) } {
             self.expression();
-            self.parser.consume(TokenType::Semicolon, "Expect ';' after loop condition.");
+            Parser::instance().lock().unwrap().consume(TokenType::Semicolon, "Expect ';' after loop condition.");
             exit_jump = self.emit_jump(OpCode::JumpIfFalse.into()) as i32;
             self.emit_byte(OpCode::Pop.into());
         }
 
-        if !self.parser.is_match(TokenType::RightParen) {
+        if { !Parser::instance().lock().unwrap().is_match(TokenType::RightParen) } {
             let body_jump = self.emit_jump(OpCode::Jump.into());
-            let increment_start = self.current_chunk.as_ref().unwrap().borrow().codes.len();
+            let increment_start = self.function.borrow().chunk.borrow().codes.len();
             self.expression();
             self.emit_byte(OpCode::Pop.into());
-            self.parser.consume(TokenType::RightParen, "Expect ')' after for clauses.");
+            Parser::instance().lock().unwrap().consume(TokenType::RightParen, "Expect ')' after for clauses.");
 
             self.emit_loop(loop_start);
             loop_start = increment_start;
@@ -178,10 +278,12 @@ impl Compiler {
     }
 
     fn number(&mut self) {
-        let token = self.parser.previous.clone().unwrap();
+        let token = { Parser::instance().lock().unwrap().previous.clone().unwrap() };
         if token.token_type == TokenType::Number {
-            let chars = &self.parser.scanner.source[token.start..token.start+token.length];
-            let value = String::from_iter(chars).parse::<f64>();
+            let value = {
+                let chars = &Parser::instance().lock().unwrap().scanner.source[token.start..token.start+token.length];
+                String::from_iter(chars).parse::<f64>()
+            };
             if let Ok(value) = value {
                 self.emit_constant(Value::Number(value));
             }
@@ -190,11 +292,11 @@ impl Compiler {
 
     fn grouping(&mut self) {
         self.expression();
-        self.parser.consume(TokenType::RightParen, "Expect ')' after expression.");
+        Parser::instance().lock().unwrap().consume(TokenType::RightParen, "Expect ')' after expression.");
     }
 
     fn unary(&mut self) {
-        let operator_type = self.parser.previous.clone().unwrap().token_type;
+        let operator_type = { Parser::instance().lock().unwrap().previous.clone().unwrap().token_type };
         self.parse_precedence(Precedence::Unary);
         match operator_type {
             TokenType::Bang => {
@@ -208,7 +310,7 @@ impl Compiler {
     }
 
     fn binary(&mut self) {
-        let operator_type = self.parser.previous.clone().unwrap().token_type;
+        let operator_type = { Parser::instance().lock().unwrap().previous.clone().unwrap().token_type }.clone();
         let (_, _, precedence) = self.get_rule(&operator_type);
         self.parse_precedence((precedence as u8 + 1).try_into().unwrap());
         match operator_type {
@@ -226,8 +328,14 @@ impl Compiler {
         };
     }
 
+    fn call(&mut self) {
+        let arg_count = self.argument_list();
+        self.emit_bytes(OpCode::Call.into(), arg_count as u8);
+    }
+
     fn literal(&mut self) {
-        match self.parser.previous.clone().unwrap().token_type {
+        let token_type = { Parser::instance().lock().unwrap().previous.clone().unwrap().token_type };
+        match token_type {
             TokenType::True => self.emit_byte(OpCode::True.into()),
             TokenType::False => self.emit_byte(OpCode::False.into()),
             TokenType::Nil => self.emit_byte(OpCode::Nil.into()),
@@ -236,15 +344,18 @@ impl Compiler {
     }
 
     fn string(&mut self) {
-        let previous = self.parser.previous.as_ref().unwrap();
-        let chars = &self.parser.scanner.source[previous.start+1..previous.start+previous.length-1];
-        let value = String::from_iter(chars);
-        let obj = Rc::new(RefCell::new(Obj::String(value)));
+        let obj = {
+            let parser = Parser::instance().lock().unwrap();
+            let previous = parser.previous.as_ref().unwrap();
+            let chars = &parser.scanner.source[previous.start+1..previous.start+previous.length-1];
+            let value = String::from_iter(chars);
+            Rc::new(RefCell::new(Obj::String(value)))
+        };
         self.emit_constant(Value::Obj(obj));
     }
 
     fn variable(&mut self, can_assign: bool) {
-        let previous = self.parser.previous.as_ref().unwrap().clone();
+        let previous = { Parser::instance().lock().unwrap().previous.as_ref().unwrap().clone() };
         self.named_variable(previous, can_assign);
     }
 
@@ -261,7 +372,7 @@ impl Compiler {
             set_op = OpCode::SetGlobal;
         }
         
-        if can_assign && self.parser.is_match(TokenType::Equal) {
+        if can_assign && { Parser::instance().lock().unwrap().is_match(TokenType::Equal) } {
             self.expression();
             self.emit_bytes(set_op.into(), arg as u8);
 
@@ -271,50 +382,70 @@ impl Compiler {
     }
 
     fn parse_precedence(&mut self, precedence: Precedence) {
-        self.parser.advance();
-        let (prefix, _, _) = self.get_rule(&self.parser.previous.clone().unwrap().token_type);
+        Parser::instance().lock().unwrap().advance();
+        let previous = { Parser::instance().lock().unwrap().previous.clone().unwrap() };
+        let (prefix, _, _) = self.get_rule(&previous.token_type);
         let can_assign = precedence.clone() as u8 <= Precedence::Assignment as u8;
         match prefix {
             Some(prefix) => self.parse_by_name(prefix.to_owned(), can_assign),
-            None => self.parser.error("Expect expression.")
+            None => { Parser::instance().lock().unwrap().error("Expect expression.") }
         };        
 
-        while let (_, _, precedence_) = self.get_rule(&self.parser.current.clone().unwrap().token_type) && (precedence.clone() as u8) <= (precedence_ as u8) {
-            self.parser.advance();
-            let (_, infix, _) = self.get_rule(&self.parser.previous.clone().unwrap().token_type);
+        loop {
+            {
+                let (_, _, precedence_) = {
+                    let token_type = Parser::instance().lock().unwrap().current.clone().unwrap().token_type;
+                    self.get_rule(&token_type)
+                };
+                if (precedence.clone() as u8) <= (precedence_ as u8) {
+                    Parser::instance().lock().unwrap().advance();
+                } else {
+                    break;
+                }
+            }
+            let (_, infix, _) = {
+                let previous = { Parser::instance().lock().unwrap().previous.clone().unwrap() };
+                self.get_rule(&previous.token_type)
+            };
             if let Some(infix) = infix {
                 self.parse_by_name(infix, can_assign);
             }
         }
-        if can_assign && self.parser.is_match(TokenType::Equal) {
-            self.parser.error("Invalid assignment target.");
+        if can_assign && { Parser::instance().lock().unwrap().is_match(TokenType::Equal) } {
+            Parser::instance().lock().unwrap().error("Invalid assignment target.");
         }
     }
 
     fn parse_variable(&mut self, error_message: &str) -> u8 {
-        self.parser.consume(TokenType::Identifier, error_message);
+        Parser::instance().lock().unwrap().consume(TokenType::Identifier, error_message);
         self.declare_variable();
         if self.scope_depth > 0 {
             return 0;
         }
-        let previous = self.parser.previous.as_ref().unwrap().clone();
+        let previous = { Parser::instance().lock().unwrap().previous.as_ref().unwrap().clone() };
         self.identifier_constant(previous)
     }
 
     fn mark_initialized(&mut self) {
+        if self.scope_depth == 0 {
+            return;
+        }
         if let Some(local) = self.locals[self.local_count-1].as_mut() {
             local.depth = self.scope_depth as i8;
         }
     }
 
     fn identifier_constant(&mut self, name: Token) -> u8 {
-        let chars = &self.parser.scanner.source[name.start..name.start+name.length];
-        let value = String::from_iter(chars);
+        let value = {
+            let chars = { &Parser::instance().lock().unwrap().scanner.source[name.start..name.start+name.length] };
+            String::from_iter(chars)
+        };
         self.make_constant(Value::Obj(Rc::new(RefCell::new(Obj::String(value)))))
     }
 
     fn identifiers_equal(&self, a: &Token, b: &Token) -> bool {
-        self.parser.scanner.source[a.start..a.start+a.length] == self.parser.scanner.source[b.start..b.start+b.length]
+        let parser = Parser::instance().lock().unwrap();
+        parser.scanner.source[a.start..a.start+a.length] == parser.scanner.source[b.start..b.start+b.length]
     }
 
     fn resolve_local(&mut self, name: &Token) -> i8 {
@@ -322,7 +453,7 @@ impl Compiler {
             let local = self.locals[i].as_ref().unwrap();
             if self.identifiers_equal(name, &local.name) {
                 if local.depth == -1 {
-                    self.parser.error("Can't read local variable in its own initializer.");
+                    Parser::instance().lock().unwrap().error("Can't read local variable in its own initializer.");
                 }
                 return i as i8;
             }
@@ -334,7 +465,7 @@ impl Compiler {
         if self.scope_depth == 0 {
             return;
         }
-        let name = self.parser.previous.as_ref().unwrap().clone();
+        let name = { Parser::instance().lock().unwrap().previous.as_ref().unwrap().clone() };
         for i in (0..self.local_count).rev() {
             let local = *&self.locals[i].as_ref().unwrap();
             if local.depth != -1 && local.depth < self.scope_depth as i8 {
@@ -342,7 +473,7 @@ impl Compiler {
             }
             
             if self.identifiers_equal(&name, &local.name) {
-                self.parser.error("Already a variable with this name in this scope.");
+                Parser::instance().lock().unwrap().error("Already a variable with this name in this scope.");
             }
         }
         self.add_local(name);
@@ -350,7 +481,7 @@ impl Compiler {
 
     fn add_local(&mut self, name: Token) {
         if self.local_count == u8::MAX as usize + 1 {
-            self.parser.error("Too many local variables in function.");
+            Parser::instance().lock().unwrap().error("Too many local variables in function.");
             return;
         }
         let local = Local{ name: name, depth: -1 };
@@ -364,6 +495,24 @@ impl Compiler {
             return;
         }
         self.emit_bytes(OpCode::DefineGlobal.into(), global);
+    }
+
+    fn argument_list(&mut self) -> usize {
+        let mut arg_count = 0;
+        if { !Parser::instance().lock().unwrap().check(TokenType::RightParen) } {
+            loop {
+                self.expression();
+                if arg_count == u8::MAX as usize {
+                    Parser::instance().lock().unwrap().error("Can't have more than 255 arguments.");
+                }
+                arg_count += 1;
+                if { !Parser::instance().lock().unwrap().is_match(TokenType::Comma) } {
+                    break;
+                }
+            }
+        }
+        Parser::instance().lock().unwrap().consume(TokenType::RightParen, "Expect ')' after arguments.");
+        arg_count
     }
 
     fn and(&mut self) {
@@ -384,7 +533,7 @@ impl Compiler {
 
     fn get_rule(&mut self, token_type: &TokenType) -> (Option<String>, Option<String>, Precedence) {
         match token_type {
-            TokenType::LeftParen => (Some("grouping".to_string()), None, Precedence::None),
+            TokenType::LeftParen => (Some("grouping".to_string()), Some("call".to_string()), Precedence::Call),
             TokenType::RightParen => (None, None, Precedence::None),
             TokenType::LeftBrace => (None, None, Precedence::None),
             TokenType::RightBrace => (None, None, Precedence::None),
@@ -431,6 +580,7 @@ impl Compiler {
             "grouping" => self.grouping(),
             "unary" => self.unary(),
             "binary" => self.binary(),
+            "call" => self.call(),
             "number" => self.number(),
             "literal" => self.literal(),
             "string" => self.string(),
@@ -442,9 +592,8 @@ impl Compiler {
     }
 
     fn emit_byte(&mut self, byte: u8) {
-        if let Some(chunk) = &self.current_chunk {
-            chunk.borrow_mut().write(byte, self.parser.previous.as_ref().unwrap().line);
-        }
+        let line = { Parser::instance().lock().unwrap().previous.as_ref().unwrap().line };
+        self.function.borrow().chunk.borrow_mut().write(byte, line);
     }
 
     fn emit_bytes(&mut self, byte1: u8, byte2: u8) {
@@ -456,14 +605,14 @@ impl Compiler {
         self.emit_byte(instruction);
         self.emit_byte(0xff);
         self.emit_byte(0xff);
-        self.current_chunk.as_ref().unwrap().borrow().codes.len() - 2
+        self.function.borrow().chunk.borrow().codes.len() - 2
     }
 
     fn emit_loop(&mut self, loop_start: usize) {
         self.emit_byte(OpCode::Loop.into());
-        let offset = self.current_chunk.as_ref().unwrap().borrow().codes.len() - loop_start + 2;
+        let offset = self.function.borrow().chunk.borrow().codes.len() - loop_start + 2;
         if offset > u16::MAX as usize {
-            self.parser.error("Loop body too large.");
+            Parser::instance().lock().unwrap().error("Loop body too large.");
         }
         self.emit_byte(((offset >> 8) & 0xff) as u8);
         self.emit_byte((offset & 0xff) as u8);
@@ -474,17 +623,22 @@ impl Compiler {
         self.emit_bytes(OpCode::Constant.into(), constant);
     }
 
+    fn emit_return(&mut self) {
+        self.emit_byte(OpCode::Nil.into());
+        self.emit_byte(OpCode::Return.into());
+    }
+
     fn patch_jump(&mut self, offset: usize) {
-        let jump = self.current_chunk.as_ref().unwrap().borrow().codes.len() - offset - 2;
+        let jump = self.function.borrow().chunk.borrow().codes.len() - offset - 2;
         if jump > u16::MAX as usize {
-            self.parser.error("Too much code to jump over.");
+            Parser::instance().lock().unwrap().error("Too much code to jump over.");
         }
-        self.current_chunk.as_ref().unwrap().borrow_mut().codes[offset] = ((jump as u32 >> 8) & 0xff) as u8;
-        self.current_chunk.as_ref().unwrap().borrow_mut().codes[offset+1] = jump as u8 & 0xff;
+        self.function.borrow().chunk.borrow_mut().codes[offset] = ((jump as u32 >> 8) & 0xff) as u8;
+        self.function.borrow().chunk.borrow_mut().codes[offset+1] = jump as u8 & 0xff;
     }
 
     fn make_constant(&mut self, value: Value) -> u8 {
-        let constant = self.current_chunk.clone().unwrap().borrow_mut().add_constant(value);
+        let constant = self.function.borrow().chunk.borrow_mut().add_constant(value);
         constant as u8
     }
 
@@ -500,8 +654,9 @@ impl Compiler {
         }
     }
 
-    fn end(&mut self) {
-        self.emit_byte(OpCode::Return.into());
+    fn end(&mut self) -> Rc<RefCell<Function>> {
+        self.emit_return();
+        self.function.clone()
     }
 }
 
@@ -514,6 +669,27 @@ struct Parser {
 }
 
 impl Parser {
+    fn init(&mut self, file_path: String, source: String) {
+        self.scanner = Scanner::init(file_path, source);
+        self.current = None;
+        self.previous = None;
+        self.had_error = false;
+        self.panic_mode = false;
+    }
+
+    fn instance() -> &'static Mutex<Parser> {
+        static PARSER: OnceLock<Mutex<Parser>> = OnceLock::new();
+        PARSER.get_or_init(|| Mutex::new({
+            Parser {
+                scanner: Scanner::init("".to_string(), "".to_string()), 
+                current: None, 
+                previous: None, 
+                had_error: false, 
+                panic_mode: false 
+            }
+        }))
+    }
+
     fn advance(&mut self) {
         self.previous = self.current.clone();
         loop {
@@ -624,4 +800,10 @@ enum Precedence {
 struct Local {
     name: Token,
     depth: i8
+}
+
+#[derive(PartialEq)]
+pub enum FunctionType {
+    Function,
+    Script
 }
