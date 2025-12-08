@@ -11,7 +11,7 @@ pub fn disassemble_chunk(chunk: Rc<RefCell<Chunk>>, name: String) {
     }
 }
 
-pub fn disassemble_instruction(chunk: Rc<RefCell<Chunk>>, offset: usize) -> usize {
+pub fn disassemble_instruction(chunk: Rc<RefCell<Chunk>>, mut offset: usize) -> usize {
     print!("{offset} ");
     print!("{} ", chunk.borrow().lines[offset]);
     let instruction: Result<OpCode, _> = chunk.borrow().codes[offset].try_into();
@@ -45,6 +45,12 @@ pub fn disassemble_instruction(chunk: Rc<RefCell<Chunk>>, offset: usize) -> usiz
         }
         OpCode::SetGlobal => {
             constant_instruction("OP_SET_GLOBAL", chunk, offset)
+        }
+        OpCode::GetUpvalue => {
+            byte_instruction("OP_GET_UPVALUE", chunk, offset)
+        }
+        OpCode::SetUpvalue => {
+            byte_instruction("OP_SET_UPVALUE", chunk, offset)
         }
         OpCode::Equal => {
             simple_instruction("OP_EQUAL", offset)
@@ -87,6 +93,25 @@ pub fn disassemble_instruction(chunk: Rc<RefCell<Chunk>>, offset: usize) -> usiz
         }
         OpCode::Call => {
             byte_instruction("OP_CALL", chunk, offset)
+        }
+        OpCode::Closure => {
+            offset += 1;
+            let constant = chunk.borrow().codes[offset];
+            offset += 1;
+            println!("OP_CLOSURE {constant} {}", chunk.borrow().constants.values[constant as usize]);
+            let function = chunk.borrow().constants.values[constant as usize].as_function().unwrap();
+            for _ in 0..function.borrow().upvalue_count {
+                let is_local = chunk.borrow().codes[offset];
+                offset += 1;
+                let index = chunk.borrow().codes[offset];
+                offset += 1;
+                println!("{} | {} {index}", offset-2, {if is_local == 1 {"local"} else {"upvalue"}});
+            }
+
+            offset
+        }
+        OpCode::CloseUpvalue => {
+            simple_instruction("OP_CLOSE_UPVALUE", offset)
         }
         OpCode::Return => {
             simple_instruction("OP_RETURN", offset)

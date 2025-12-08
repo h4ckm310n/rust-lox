@@ -5,17 +5,17 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 pub struct Compiler {
     weak_self: Option<Weak<RefCell<Self>>>,
-    enclosing: Option<Rc<RefCell<Compiler>>>,
+    enclosing: Option<Weak<RefCell<Compiler>>>,
     function: Rc<RefCell<Function>>,
     function_type: FunctionType,
-    //parser: Rc<RefCell<Parser>>,
-    locals: [Option<Local>; u8::MAX as usize + 1],
-    local_count: usize,
-    scope_depth: usize
+    locals: RefCell<[Option<Local>; u8::MAX as usize + 1]>,
+    local_count: RefCell<usize>,
+    upvalues: RefCell<[Option<Upvalue>; u8::MAX as usize + 1]>,
+    scope_depth: RefCell<usize>
 }
 
 impl Compiler {
-    pub fn new(file_path: String, source: String, function_type: FunctionType, enclosing: Option<Rc<RefCell<Compiler>>>) -> Self {
+    pub fn new(file_path: String, source: String, function_type: FunctionType, enclosing: Option<Weak<RefCell<Compiler>>>) -> Self {
         if enclosing.is_none() {
             Parser::instance().lock().unwrap().init(file_path, source);
         }
@@ -24,10 +24,10 @@ impl Compiler {
             enclosing: enclosing,
             function: Rc::new(RefCell::new(Function::new())),
             function_type: function_type,
-            //parser: parser,
-            locals: [const { None }; u8::MAX as usize + 1],
-            local_count: 0,
-            scope_depth: 0
+            locals: RefCell::new([const { None }; u8::MAX as usize + 1]),
+            local_count: RefCell::new(0),
+            upvalues: RefCell::new([const { None }; u8::MAX as usize + 1]),
+            scope_depth: RefCell::new(0)
         }
     }
 
@@ -38,18 +38,19 @@ impl Compiler {
             let chars = &parser.scanner.source[previous.start..previous.start+previous.length];
             self.function.borrow_mut().name = String::from_iter(chars);
         }
-        self.locals[0] = Some(Local {
+        self.locals.borrow_mut()[0] = Some(Local {
             name: Token { token_type: TokenType::Nil, start: 0, length: 0, line: 0 },
-            depth: 0
+            depth: 0,
+            is_captured: false
         });
-        self.local_count += 1;
+        *self.local_count.borrow_mut() += 1;
     }
 
     pub fn set_weak_self(&mut self, weak_self: Weak<RefCell<Self>>) {
         self.weak_self = Some(weak_self);
     }
 
-    pub fn compile(&mut self) -> Option<Rc<RefCell<Function>>> {
+    pub fn compile(&self) -> Option<Rc<RefCell<Function>>> {
         Parser::instance().lock().unwrap().advance();
         loop {
             let is_match = {
@@ -68,7 +69,7 @@ impl Compiler {
         }
     }
 
-    fn declaration(&mut self) {
+    fn declaration(&self) {
         if { Parser::instance().lock().unwrap().is_match(TokenType::Fun) } {
             self.fun_declaration();
         } else if { Parser::instance().lock().unwrap().is_match(TokenType::Var) } {
@@ -81,14 +82,14 @@ impl Compiler {
         }
     }
 
-    fn fun_declaration(&mut self) {
+    fn fun_declaration(&self) {
         let global = self.parse_variable("Expect function name.");
         self.mark_initialized();
         self.function(FunctionType::Function);
         self.define_variable(global);
     }
 
-    fn var_declaration(&mut self) {
+    fn var_declaration(&self) {
         let global = self.parse_variable("Expect variable name.");
         if { Parser::instance().lock().unwrap().is_match(TokenType::Equal) } {
             self.expression();
@@ -99,7 +100,7 @@ impl Compiler {
         self.define_variable(global);
     }
 
-    fn statement(&mut self) {
+    fn statement(&self) {
         if { Parser::instance().lock().unwrap().is_match(TokenType::Print) } {
             self.print_statement();
         } else if { Parser::instance().lock().unwrap().is_match(TokenType::Return) } {
@@ -119,13 +120,13 @@ impl Compiler {
         }
     }
 
-    fn print_statement(&mut self) {
+    fn print_statement(&self) {
         self.expression();
         Parser::instance().lock().unwrap().consume(TokenType::Semicolon, "Expect ';' after value.");
         self.emit_byte(OpCode::Print.into());
     }
 
-    fn return_statement(&mut self) {
+    fn return_statement(&self) {
         if self.function_type == FunctionType::Script {
             Parser::instance().lock().unwrap().error("Can't return from top-level code.");
         }
@@ -138,7 +139,7 @@ impl Compiler {
         }
     }
 
-    fn block(&mut self) {
+    fn block(&self) {
         loop {
             let check = {
                 let parser = Parser::instance().lock().unwrap();
@@ -153,29 +154,28 @@ impl Compiler {
         Parser::instance().lock().unwrap().consume(TokenType::RightBrace, "Expect '}' after block.");
     }
 
-    fn function(&mut self, function_type: FunctionType) {
+    fn function(&self, function_type: FunctionType) {
         let file_path = {
             Parser::instance().lock().unwrap().scanner.file_path.clone()
         };
         let source = {
             String::from_iter(Parser::instance().lock().unwrap().scanner.source.clone())
         };
-        let _self = self.weak_self.as_ref().unwrap().upgrade().unwrap();
         let compiler = Rc::new(RefCell::new(
-            Compiler::new(file_path, source, function_type, Some(_self.clone()))
+            Compiler::new(file_path, source, function_type, Some(self.weak_self.as_ref().unwrap().clone()))
         ));
         compiler.borrow_mut().set_weak_self(Rc::downgrade(&compiler));
         compiler.borrow_mut().init();
-        compiler.borrow_mut().begin_scope();
+        compiler.borrow().begin_scope();
         Parser::instance().lock().unwrap().consume(TokenType::LeftParen, "Expect '(' after function name.");
         if { !Parser::instance().lock().unwrap().check(TokenType::RightParen) } {
             loop {
-                compiler.borrow_mut().function.borrow_mut().arity += 1;
-                if compiler.borrow_mut().function.borrow().arity > u8::MAX as usize {
+                compiler.borrow().function.borrow_mut().arity += 1;
+                if compiler.borrow().function.borrow().arity > u8::MAX as usize {
                     Parser::instance().lock().unwrap().error_at_current("Can't have more than 255 parameters.");
                 }
-                let constant = compiler.borrow_mut().parse_variable("Expect parameter name.");
-                compiler.borrow_mut().define_variable(constant);
+                let constant = compiler.borrow().parse_variable("Expect parameter name.");
+                compiler.borrow().define_variable(constant);
                 if { !Parser::instance().lock().unwrap().is_match(TokenType::Comma) } {
                     break;
                 }
@@ -186,19 +186,27 @@ impl Compiler {
             parser.consume(TokenType::RightParen, "Expect ')' after parameters.");
             parser.consume(TokenType::LeftBrace, "Expect '{' before function body.");
         }
-        compiler.borrow_mut().block();
-        let function = compiler.borrow_mut().end();
-        let value = self.make_constant(Value::Obj(Rc::new(RefCell::new(Obj::Function(function)))));
-        self.emit_bytes(OpCode::Constant.into(), value);
+        compiler.borrow().block();
+        let function = compiler.borrow().end();
+        let value = self.make_constant(Value::Obj(Rc::new(RefCell::new(Obj::Function(function.clone())))));
+        self.emit_bytes(OpCode::Closure.into(), value);
+
+        let upvalues = &compiler.borrow().upvalues;
+        for i in 0..function.borrow().upvalue_count {
+            let upvalues_ = upvalues.borrow();
+            let upvalue = upvalues_[i].as_ref().unwrap();
+            self.emit_byte(upvalue.is_local as u8);
+            self.emit_byte(upvalue.index as u8);
+        }
     }
 
-    fn expression_statement(&mut self) {
+    fn expression_statement(&self) {
         self.expression();
         Parser::instance().lock().unwrap().consume(TokenType::Semicolon, "Expect ';' after expression.");
         self.emit_byte(OpCode::Pop.into());
     }
 
-    fn if_statement(&mut self) {
+    fn if_statement(&self) {
         Parser::instance().lock().unwrap().consume(TokenType::LeftParen, "Expect '(' after 'if'.");
         self.expression();
         Parser::instance().lock().unwrap().consume(TokenType::RightParen, "Expect ')' after condition.");
@@ -215,7 +223,7 @@ impl Compiler {
         self.patch_jump(else_jump);
     }
 
-    fn while_statement(&mut self) {
+    fn while_statement(&self) {
         let loop_start = self.function.borrow().chunk.borrow().codes.len();
         Parser::instance().lock().unwrap().consume(TokenType::LeftParen, "Expect '(' after 'while'.");
         self.expression();
@@ -230,7 +238,7 @@ impl Compiler {
         self.emit_byte(OpCode::Pop.into());
     }
 
-    fn for_statement(&mut self) {
+    fn for_statement(&self) {
         self.begin_scope();
         Parser::instance().lock().unwrap().consume(TokenType::LeftParen, "Expect '(' after 'for'.");
         if { Parser::instance().lock().unwrap().is_match(TokenType::Semicolon) } {
@@ -273,11 +281,11 @@ impl Compiler {
         self.end_scope();
     }
 
-    fn expression(&mut self) {
+    fn expression(&self) {
         self.parse_precedence(Precedence::Assignment);
     }
 
-    fn number(&mut self) {
+    fn number(&self) {
         let token = { Parser::instance().lock().unwrap().previous.clone().unwrap() };
         if token.token_type == TokenType::Number {
             let value = {
@@ -290,12 +298,12 @@ impl Compiler {
         }
     }
 
-    fn grouping(&mut self) {
+    fn grouping(&self) {
         self.expression();
         Parser::instance().lock().unwrap().consume(TokenType::RightParen, "Expect ')' after expression.");
     }
 
-    fn unary(&mut self) {
+    fn unary(&self) {
         let operator_type = { Parser::instance().lock().unwrap().previous.clone().unwrap().token_type };
         self.parse_precedence(Precedence::Unary);
         match operator_type {
@@ -309,7 +317,7 @@ impl Compiler {
         }
     }
 
-    fn binary(&mut self) {
+    fn binary(&self) {
         let operator_type = { Parser::instance().lock().unwrap().previous.clone().unwrap().token_type }.clone();
         let (_, _, precedence) = self.get_rule(&operator_type);
         self.parse_precedence((precedence as u8 + 1).try_into().unwrap());
@@ -328,12 +336,12 @@ impl Compiler {
         };
     }
 
-    fn call(&mut self) {
+    fn call(&self) {
         let arg_count = self.argument_list();
         self.emit_bytes(OpCode::Call.into(), arg_count as u8);
     }
 
-    fn literal(&mut self) {
+    fn literal(&self) {
         let token_type = { Parser::instance().lock().unwrap().previous.clone().unwrap().token_type };
         match token_type {
             TokenType::True => self.emit_byte(OpCode::True.into()),
@@ -343,7 +351,7 @@ impl Compiler {
         }
     }
 
-    fn string(&mut self) {
+    fn string(&self) {
         let obj = {
             let parser = Parser::instance().lock().unwrap();
             let previous = parser.previous.as_ref().unwrap();
@@ -354,18 +362,22 @@ impl Compiler {
         self.emit_constant(Value::Obj(obj));
     }
 
-    fn variable(&mut self, can_assign: bool) {
+    fn variable(&self, can_assign: bool) {
         let previous = { Parser::instance().lock().unwrap().previous.as_ref().unwrap().clone() };
         self.named_variable(previous, can_assign);
     }
 
-    fn named_variable(&mut self, name: Token, can_assign: bool) {
+    fn named_variable(&self, name: Token, can_assign: bool) {
         let get_op;
         let set_op;
         let mut arg = self.resolve_local(&name);
         if arg != -1 {
             get_op = OpCode::GetLocal;
             set_op = OpCode::SetLocal;
+        } else if let arg_ = self.resolve_upvalue(&name) && arg_ != -1 {
+            arg = arg_;
+            get_op = OpCode::GetUpvalue;
+            set_op = OpCode::SetUpvalue;
         } else {
             arg = self.identifier_constant(name) as i8;
             get_op = OpCode::GetGlobal;
@@ -381,7 +393,7 @@ impl Compiler {
         }
     }
 
-    fn parse_precedence(&mut self, precedence: Precedence) {
+    fn parse_precedence(&self, precedence: Precedence) {
         Parser::instance().lock().unwrap().advance();
         let previous = { Parser::instance().lock().unwrap().previous.clone().unwrap() };
         let (prefix, _, _) = self.get_rule(&previous.token_type);
@@ -416,26 +428,26 @@ impl Compiler {
         }
     }
 
-    fn parse_variable(&mut self, error_message: &str) -> u8 {
+    fn parse_variable(&self, error_message: &str) -> u8 {
         Parser::instance().lock().unwrap().consume(TokenType::Identifier, error_message);
         self.declare_variable();
-        if self.scope_depth > 0 {
+        if *self.scope_depth.borrow() > 0 {
             return 0;
         }
         let previous = { Parser::instance().lock().unwrap().previous.as_ref().unwrap().clone() };
         self.identifier_constant(previous)
     }
 
-    fn mark_initialized(&mut self) {
-        if self.scope_depth == 0 {
+    fn mark_initialized(&self) {
+        if *self.scope_depth.borrow() == 0 {
             return;
         }
-        if let Some(local) = self.locals[self.local_count-1].as_mut() {
-            local.depth = self.scope_depth as i8;
+        if let Some(local) = self.locals.borrow_mut()[*self.local_count.borrow()-1].as_mut() {
+            local.depth = *self.scope_depth.borrow() as i8;
         }
     }
 
-    fn identifier_constant(&mut self, name: Token) -> u8 {
+    fn identifier_constant(&self, name: Token) -> u8 {
         let value = {
             let chars = { &Parser::instance().lock().unwrap().scanner.source[name.start..name.start+name.length] };
             String::from_iter(chars)
@@ -448,9 +460,10 @@ impl Compiler {
         parser.scanner.source[a.start..a.start+a.length] == parser.scanner.source[b.start..b.start+b.length]
     }
 
-    fn resolve_local(&mut self, name: &Token) -> i8 {
-        for i in (0..self.local_count).rev() {
-            let local = self.locals[i].as_ref().unwrap();
+    fn resolve_local(&self, name: &Token) -> i8 {
+        let locals = self.locals.borrow();
+        for i in (0..*self.local_count.borrow()).rev() {
+            let local = locals[i].as_ref().unwrap();
             if self.identifiers_equal(name, &local.name) {
                 if local.depth == -1 {
                     Parser::instance().lock().unwrap().error("Can't read local variable in its own initializer.");
@@ -461,43 +474,86 @@ impl Compiler {
         -1
     }
 
-    fn declare_variable(&mut self) {
-        if self.scope_depth == 0 {
+    fn resolve_upvalue(&self, name: &Token) -> i8 {
+        if self.enclosing.is_none() {
+            return -1;
+        }
+        let local = self.enclosing.as_ref().unwrap().upgrade().unwrap().borrow().resolve_local(name);
+        if local != -1 {
+            self.enclosing.as_ref().unwrap().upgrade().unwrap().borrow().locals.borrow_mut()[local as usize].as_mut().unwrap().is_captured = true;
+            return self.add_upvalue(local as usize, true);
+        }
+        let upvalue = self.enclosing.as_ref().unwrap().upgrade().unwrap().borrow().resolve_upvalue(name);
+        if upvalue != -1 {
+            return self.add_upvalue(upvalue as usize, false);
+        }
+        -1
+    }
+
+    fn add_upvalue(&self, index: usize, is_local: bool) -> i8 {
+        let upvalue_count = self.function.borrow().upvalue_count;
+
+        let mut upvalues = self.upvalues.borrow_mut();
+        for i in 0..upvalue_count {
+            let upvalue = &upvalues[i].as_ref().unwrap();
+            if upvalue.index == index && upvalue.is_local == is_local {
+                return i as i8;
+            }
+        }
+
+        if upvalue_count == u8::MAX as usize + 1 {
+            Parser::instance().lock().unwrap().error("Too many closure variables in function.");
+            return 0;
+        }
+
+        upvalues[upvalue_count] = Some(Upvalue {
+            index: index,
+            is_local: is_local,
+        });
+        self.function.borrow_mut().upvalue_count += 1;
+        upvalue_count as i8
+    }
+
+    fn declare_variable(&self) {
+        if *self.scope_depth.borrow() == 0 {
             return;
         }
         let name = { Parser::instance().lock().unwrap().previous.as_ref().unwrap().clone() };
-        for i in (0..self.local_count).rev() {
-            let local = *&self.locals[i].as_ref().unwrap();
-            if local.depth != -1 && local.depth < self.scope_depth as i8 {
-                break;
-            }
-            
-            if self.identifiers_equal(&name, &local.name) {
-                Parser::instance().lock().unwrap().error("Already a variable with this name in this scope.");
+        {
+            let locals = self.locals.borrow();
+            for i in (0..*self.local_count.borrow()).rev() {
+                let local = *&locals[i].as_ref().unwrap();
+                if local.depth != -1 && local.depth < *self.scope_depth.borrow() as i8 {
+                    break;
+                }
+                
+                if self.identifiers_equal(&name, &local.name) {
+                    Parser::instance().lock().unwrap().error("Already a variable with this name in this scope.");
+                }
             }
         }
         self.add_local(name);
     }
 
-    fn add_local(&mut self, name: Token) {
-        if self.local_count == u8::MAX as usize + 1 {
+    fn add_local(&self, name: Token) {
+        if *self.local_count.borrow() == u8::MAX as usize + 1 {
             Parser::instance().lock().unwrap().error("Too many local variables in function.");
             return;
         }
-        let local = Local{ name: name, depth: -1 };
-        self.locals[self.local_count] = Some(local);
-        self.local_count += 1;
+        let local = Local{ name: name, depth: -1, is_captured: false };
+        self.locals.borrow_mut()[*self.local_count.borrow()] = Some(local);
+        *self.local_count.borrow_mut() += 1;
     }
 
-    fn define_variable(&mut self, global: u8) {
-        if self.scope_depth > 0 {
+    fn define_variable(&self, global: u8) {
+        if *self.scope_depth.borrow() > 0 {
             self.mark_initialized();
             return;
         }
         self.emit_bytes(OpCode::DefineGlobal.into(), global);
     }
 
-    fn argument_list(&mut self) -> usize {
+    fn argument_list(&self) -> usize {
         let mut arg_count = 0;
         if { !Parser::instance().lock().unwrap().check(TokenType::RightParen) } {
             loop {
@@ -515,14 +571,14 @@ impl Compiler {
         arg_count
     }
 
-    fn and(&mut self) {
+    fn and(&self) {
         let end_jump = self.emit_jump(OpCode::JumpIfFalse.into());
         self.emit_byte(OpCode::Pop.into());
         self.parse_precedence(Precedence::And);
         self.patch_jump(end_jump);
     }
 
-    fn or(&mut self) {
+    fn or(&self) {
         let else_jump = self.emit_jump(OpCode::JumpIfFalse.into());
         let end_jump = self.emit_jump(OpCode::Jump.into());
         self.patch_jump(else_jump);
@@ -531,7 +587,7 @@ impl Compiler {
         self.patch_jump(end_jump);
     }
 
-    fn get_rule(&mut self, token_type: &TokenType) -> (Option<String>, Option<String>, Precedence) {
+    fn get_rule(&self, token_type: &TokenType) -> (Option<String>, Option<String>, Precedence) {
         match token_type {
             TokenType::LeftParen => (Some("grouping".to_string()), Some("call".to_string()), Precedence::Call),
             TokenType::RightParen => (None, None, Precedence::None),
@@ -575,7 +631,7 @@ impl Compiler {
         }
     }
 
-    fn parse_by_name(&mut self, name: String, can_assign: bool) {
+    fn parse_by_name(&self, name: String, can_assign: bool) {
         match &name as &str {
             "grouping" => self.grouping(),
             "unary" => self.unary(),
@@ -591,24 +647,24 @@ impl Compiler {
         }
     }
 
-    fn emit_byte(&mut self, byte: u8) {
+    fn emit_byte(&self, byte: u8) {
         let line = { Parser::instance().lock().unwrap().previous.as_ref().unwrap().line };
         self.function.borrow().chunk.borrow_mut().write(byte, line);
     }
 
-    fn emit_bytes(&mut self, byte1: u8, byte2: u8) {
+    fn emit_bytes(&self, byte1: u8, byte2: u8) {
         self.emit_byte(byte1);
         self.emit_byte(byte2);
     }
 
-    fn emit_jump(&mut self, instruction: u8) -> usize {
+    fn emit_jump(&self, instruction: u8) -> usize {
         self.emit_byte(instruction);
         self.emit_byte(0xff);
         self.emit_byte(0xff);
         self.function.borrow().chunk.borrow().codes.len() - 2
     }
 
-    fn emit_loop(&mut self, loop_start: usize) {
+    fn emit_loop(&self, loop_start: usize) {
         self.emit_byte(OpCode::Loop.into());
         let offset = self.function.borrow().chunk.borrow().codes.len() - loop_start + 2;
         if offset > u16::MAX as usize {
@@ -618,17 +674,17 @@ impl Compiler {
         self.emit_byte((offset & 0xff) as u8);
     }
 
-    fn emit_constant(&mut self, value: Value) {
+    fn emit_constant(&self, value: Value) {
         let constant = self.make_constant(value);
         self.emit_bytes(OpCode::Constant.into(), constant);
     }
 
-    fn emit_return(&mut self) {
+    fn emit_return(&self) {
         self.emit_byte(OpCode::Nil.into());
         self.emit_byte(OpCode::Return.into());
     }
 
-    fn patch_jump(&mut self, offset: usize) {
+    fn patch_jump(&self, offset: usize) {
         let jump = self.function.borrow().chunk.borrow().codes.len() - offset - 2;
         if jump > u16::MAX as usize {
             Parser::instance().lock().unwrap().error("Too much code to jump over.");
@@ -637,24 +693,28 @@ impl Compiler {
         self.function.borrow().chunk.borrow_mut().codes[offset+1] = jump as u8 & 0xff;
     }
 
-    fn make_constant(&mut self, value: Value) -> u8 {
+    fn make_constant(&self, value: Value) -> u8 {
         let constant = self.function.borrow().chunk.borrow_mut().add_constant(value);
         constant as u8
     }
 
-    fn begin_scope(&mut self) {
-        self.scope_depth += 1;
+    fn begin_scope(&self) {
+        *self.scope_depth.borrow_mut() += 1;
     }
 
-    fn end_scope(&mut self) {
-        self.scope_depth -= 1;
-        while self.local_count > 0 && self.locals[self.local_count-1].as_ref().unwrap().depth > self.scope_depth as i8 {
-            self.emit_byte(OpCode::Pop.into());
-            self.local_count -= 1;
+    fn end_scope(&self) {
+        *self.scope_depth.borrow_mut() -= 1;
+        while *self.local_count.borrow() > 0 && self.locals.borrow()[*self.local_count.borrow()-1].as_ref().unwrap().depth > *self.scope_depth.borrow() as i8 {
+            if self.locals.borrow()[*self.local_count.borrow()-1].as_ref().unwrap().is_captured {
+                self.emit_byte(OpCode::CloseUpvalue.into());
+            } else {
+                self.emit_byte(OpCode::Pop.into());
+            }
+            *self.local_count.borrow_mut() -= 1;
         }
     }
 
-    fn end(&mut self) -> Rc<RefCell<Function>> {
+    fn end(&self) -> Rc<RefCell<Function>> {
         self.emit_return();
         self.function.clone()
     }
@@ -799,7 +859,13 @@ enum Precedence {
 #[derive(Clone)]
 struct Local {
     name: Token,
-    depth: i8
+    depth: i8,
+    is_captured: bool
+}
+
+struct Upvalue {
+    index: usize,
+    is_local: bool
 }
 
 #[derive(PartialEq)]

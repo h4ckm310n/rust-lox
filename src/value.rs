@@ -1,6 +1,6 @@
 use std::{cell::RefCell, fmt, rc::Rc};
 
-use crate::object::{Function, NativeFn, Obj};
+use crate::object::{Closure, Function, NativeFn, Obj};
 
 #[derive(Clone)]
 pub enum Value {
@@ -30,6 +30,15 @@ impl Value {
     pub fn as_obj(&self) -> Option<Rc<RefCell<Obj>>> {
         if let Self::Obj(obj) = &self {
             Some(obj.clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn as_closure(&self) -> Option<Rc<RefCell<Closure>>> {
+        if let Some(obj) = self.as_obj() &&
+           let Obj::Closure(closure) = &*obj.borrow() {
+            Some(closure.clone())
         } else {
             None
         }
@@ -82,6 +91,10 @@ impl Value {
         self.as_obj().is_some()
     }
 
+    pub fn is_closure(&self) -> bool {
+        self.as_closure().is_some()
+    }
+
     pub fn is_function(&self) -> bool {
         self.as_function().is_some()
     }
@@ -106,9 +119,11 @@ impl fmt::Display for Value {
             Self::Boolean(boolean) => write!(f, "{boolean}"),
             Self::Number(number) => write!(f, "{number}"),
             Self::Obj(obj) => match &*obj.borrow() {
+                Obj::Closure(closure) => write!(f, "{}", closure.borrow().function.borrow()),
                 Obj::Function(function) => write!(f, "{}", function.borrow()),
                 Obj::NativeFn(_) => write!(f, "<native fn>"),
                 Obj::String(string) => write!(f, "{string}"),
+                Obj::Upvalue(_) => write!(f, "upvalue")
             }
         }
     }
@@ -124,6 +139,7 @@ impl PartialEq for Value {
             (Self::Number(l0), Self::Number(r0)) => l0 == r0,
             (Self::Obj(l0), Self::Obj(r0)) => {
                 match (&*l0.borrow(), &*r0.borrow()) {
+                    (Obj::Closure(l0), Obj::Closure(r0)) => *l0.borrow().function == *r0.borrow().function,
                     (Obj::Function(l0), Obj::Function(r0)) => *l0 == *r0,
                     (Obj::String(l0), Obj::String(r0)) => *l0 == *r0,
                     _ => false
