@@ -137,6 +137,14 @@ impl VM {
                     self.pop_stack();
                     self.push_stack(value);
                 }
+                OpCode::GetSuper => {
+                    let name = frame.borrow_mut().read_string();
+                    let value = self.pop_stack().unwrap();
+                    let superclass = value.as_class().unwrap();
+                    if !self.bind_method(superclass, name) {
+                        return Err(InterpretError::Runtime);
+                    }
+                }
                 OpCode::Equal => {
                     let b = self.pop_stack().unwrap();
                     let a = self.pop_stack().unwrap();
@@ -211,6 +219,15 @@ impl VM {
                     }
                     frame = self.frames.last().unwrap().clone();
                 }
+                OpCode::SuperInvoke => {
+                    let method = frame.borrow_mut().read_string();
+                    let arg_count = frame.borrow_mut().read_byte();
+                    let superclass = self.pop_stack().unwrap().as_class().unwrap();
+                    if !self.invoke_from_class(superclass, method, arg_count as usize) {
+                        return Err(InterpretError::Runtime);
+                    }
+                    frame = self.frames.last().unwrap().clone();
+                }
                 OpCode::Closure => {
                     let function = frame.borrow_mut().read_constant().as_function().unwrap();
                     let closure = Rc::new(RefCell::new(Closure::new(function.clone())));
@@ -251,6 +268,18 @@ impl VM {
                 OpCode::Class => {
                     let name = frame.borrow_mut().read_string();
                     self.push_stack(Rc::new(Value::Obj(Rc::new(RefCell::new(Obj::Class(Rc::new(RefCell::new(Class::new(name)))))))));
+                }
+                OpCode::Inherit => {
+                    let superclass = self.peek(1);
+                    if !superclass.is_class() {
+                        self.runtime_error("Superclass must be a class.");
+                        return Err(InterpretError::Runtime);
+                    }
+                    let subclass = self.peek(0).as_class().unwrap();
+                    for (name, method) in &superclass.as_class().unwrap().borrow().methods {
+                        subclass.borrow_mut().methods.insert(name.clone(), method.clone());
+                    }
+                    self.pop_stack();
                 }
                 OpCode::Method => {
                     let name = frame.borrow_mut().read_string();

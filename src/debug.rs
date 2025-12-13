@@ -58,6 +58,9 @@ pub fn disassemble_instruction(chunk: Rc<RefCell<Chunk>>, mut offset: usize) -> 
         OpCode::SetProperty => {
             constant_instruction("OP_SET_PROPERTY", chunk, offset)
         }
+        OpCode::GetSuper => {
+            constant_instruction("OP_GET_SUPER", chunk, offset)
+        }
         OpCode::Equal => {
             simple_instruction("OP_EQUAL", offset)
         }
@@ -103,6 +106,9 @@ pub fn disassemble_instruction(chunk: Rc<RefCell<Chunk>>, mut offset: usize) -> 
         OpCode::Invoke => {
             invoke_instruction("OP_INVOKE", chunk, offset)
         }
+        OpCode::SuperInvoke => {
+            invoke_instruction("OP_SUPER_INVOKE", chunk, offset)
+        }
         OpCode::Closure => {
             offset += 1;
             let constant = chunk.borrow().codes[offset];
@@ -127,6 +133,9 @@ pub fn disassemble_instruction(chunk: Rc<RefCell<Chunk>>, mut offset: usize) -> 
         }
         OpCode::Class => {
             constant_instruction("OP_CLASS", chunk, offset)
+        }
+        OpCode::Inherit => {
+            simple_instruction("OP_INHERIT", offset)
         }
         OpCode::Method => {
             constant_instruction("OP_METHOD", chunk, offset)

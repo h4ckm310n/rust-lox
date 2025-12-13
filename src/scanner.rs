@@ -92,6 +92,7 @@ impl Scanner {
             start: self.start,
             length: self.current - self.start,
             line: self.line,
+            text: None
         };
         token
     }
@@ -243,7 +244,8 @@ pub struct Token {
     pub token_type: TokenType,
     pub start: usize,
     pub length: usize,
-    pub line: usize
+    pub line: usize,
+    pub text: Option<String>
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]

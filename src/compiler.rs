@@ -20,10 +20,15 @@ impl Compiler {
         if enclosing.is_none() {
             Parser::instance().lock().unwrap().init(file_path, source);
         }
+        let current_class = if let Some(enclosing) = &enclosing {
+            enclosing.upgrade().unwrap().borrow().current_class.clone()
+        } else {
+            RefCell::new(None)
+        };
         Self {
             weak_self: None,
             enclosing: enclosing,
-            current_class: RefCell::new(None),
+            current_class: current_class,
             function: Rc::new(RefCell::new(Function::new())),
             function_type: function_type,
             locals: RefCell::new([const { None }; u8::MAX as usize + 1]),
@@ -42,9 +47,9 @@ impl Compiler {
         }
         self.locals.borrow_mut()[0] = Some(Local {
             name: if self.function_type == FunctionType::Function {
-                Token { token_type: TokenType::Nil, start: 0, length: 0, line: 0 }
+                Token { token_type: TokenType::Nil, start: 0, length: 0, line: 0, text: None }
             } else {
-                Token { token_type: TokenType::This, start: 0, length: 4, line: 0 }
+                Token { token_type: TokenType::Nil, start: 0, length: 0, line: 0, text: Some("this".to_string()) }
             },
             depth: 0,
             is_captured: false
@@ -100,6 +105,22 @@ impl Compiler {
         self.define_variable(name_constant);
         let class_compiler = Rc::new(RefCell::new(ClassCompiler::new(self.current_class.borrow().clone())));
         *self.current_class.borrow_mut() = Some(class_compiler.clone());
+
+        if { Parser::instance().lock().unwrap().is_match(TokenType::Less) } {
+            Parser::instance().lock().unwrap().consume(TokenType::Identifier, "Expect superclass name.");
+            self.variable(false);
+            let previous = { Parser::instance().lock().unwrap().previous.as_ref().unwrap().clone() };
+            if self.identifiers_equal(&class_name, &previous) {
+                Parser::instance().lock().unwrap().error("A class can't inherit from itself.");
+            }
+            self.begin_scope();
+            self.add_local(Token { token_type: TokenType::Nil, start: 0, length: 0, line: 0, text: Some("super".to_string()) });
+            self.define_variable(0);
+            self.named_variable(class_name.clone(), false);
+            self.emit_byte(OpCode::Inherit.into());
+            class_compiler.borrow_mut().has_super_class = true;
+        }
+
         self.named_variable(class_name, false);
         Parser::instance().lock().unwrap().consume(TokenType::LeftBrace, "Expect '{' before class body.");
         loop {
@@ -113,6 +134,9 @@ impl Compiler {
         }
         Parser::instance().lock().unwrap().consume(TokenType::RightBrace, "Expect '}' after class body.");
         self.emit_byte(OpCode::Pop.into());
+        if class_compiler.borrow().has_super_class {
+            self.end_scope();
+        }
         *self.current_class.borrow_mut() = class_compiler.borrow().enclosing.clone();
     }
 
@@ -419,6 +443,31 @@ impl Compiler {
         self.variable(false);
     }
 
+    fn super_(&self) {
+        let previous = {
+            let mut parser = Parser::instance().lock().unwrap();
+            if self.current_class.borrow().is_none() {
+                parser.error("Can't use 'super' outside of a class.");
+            } else if !self.current_class.borrow().as_ref().unwrap().borrow().has_super_class {
+                parser.error("Can't use 'super' in a class with no superclass.");
+            }
+            parser.consume(TokenType::Dot, "Expect '.' after 'super'.");
+            parser.consume(TokenType::Identifier, "Expect superclass method name.");
+            parser.previous.as_ref().unwrap().clone()
+        };
+        let name = self.identifier_constant(previous);
+        self.named_variable(Token { token_type: TokenType::Nil, start: 0, length: 0, line: 0, text: Some("this".to_string()) }, false);
+        if { Parser::instance().lock().unwrap().is_match(TokenType::LeftParen) } {
+            let arg_count = self.argument_list();
+            self.named_variable(Token { token_type: TokenType::Nil, start: 0, length: 0, line: 0, text: Some("super".to_string()) }, false);
+            self.emit_bytes(OpCode::SuperInvoke.into(), name);
+            self.emit_byte(arg_count as u8);
+        } else {
+            self.named_variable(Token { token_type: TokenType::Nil, start: 0, length: 0, line: 0, text: Some("super".to_string()) }, false);
+            self.emit_bytes(OpCode::GetSuper.into(), name);
+        }
+    }
+
     fn literal(&self) {
         let token_type = { Parser::instance().lock().unwrap().previous.clone().unwrap().token_type };
         match token_type {
@@ -535,14 +584,20 @@ impl Compiler {
 
     fn identifiers_equal(&self, a: &Token, b: &Token) -> bool {
         let parser = Parser::instance().lock().unwrap();
-        parser.scanner.source[a.start..a.start+a.length] == parser.scanner.source[b.start..b.start+b.length]
+        if let (Some(a_text), Some(b_text)) = (&a.text, &b.text) {
+            a_text == b_text
+        } else if let Some(b_text) = &b.text {
+            String::from_iter(&parser.scanner.source[a.start..a.start+a.length]) == *b_text
+        } else {
+            parser.scanner.source[a.start..a.start+a.length] == parser.scanner.source[b.start..b.start+b.length]
+        }
     }
 
     fn resolve_local(&self, name: &Token) -> i8 {
         let locals = self.locals.borrow();
         for i in (0..*self.local_count.borrow()).rev() {
             let local = locals[i].as_ref().unwrap();
-            if self.identifiers_equal(name, &local.name) || { Parser::instance().lock().unwrap().scanner.source[name.start..name.start+name.length] == ['t', 'h', 'i', 's'] && local.name.token_type == TokenType::This }  {
+            if self.identifiers_equal(name, &local.name) {
                 if local.depth == -1 {
                     Parser::instance().lock().unwrap().error("Can't read local variable in its own initializer.");
                 }
@@ -699,7 +754,7 @@ impl Compiler {
             TokenType::While => (None, None, Precedence::None),
             TokenType::Print => (None, None, Precedence::None),
             TokenType::Return => (None, None, Precedence::None),
-            TokenType::Super => (None, None, Precedence::None),
+            TokenType::Super => (Some("super".to_string()), None, Precedence::None),
             TokenType::This => (Some("this".to_string()), None, Precedence::None),
             TokenType::Var => (None, None, Precedence::None),
             TokenType::Class => (None, None, Precedence::None),
@@ -723,6 +778,7 @@ impl Compiler {
             "or" => self.or(),
             "dot" => self.dot(can_assign),
             "this" => self.this(),
+            "super" => self.super_(),
             _ => ()
         }
     }
@@ -805,13 +861,15 @@ impl Compiler {
 }
 
 struct ClassCompiler {
-    enclosing: Option<Rc<RefCell<ClassCompiler>>>
+    enclosing: Option<Rc<RefCell<ClassCompiler>>>,
+    has_super_class: bool
 }
 
 impl ClassCompiler {
     fn new(enclosing: Option<Rc<RefCell<ClassCompiler>>>) -> Self {
         Self {
-            enclosing: enclosing
+            enclosing: enclosing,
+            has_super_class: false
         }
     }
 }
