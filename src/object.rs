@@ -1,10 +1,14 @@
 use crate::{chunk::Chunk, value::Value};
+use std::collections::HashMap;
 use std::{rc::Rc, cell::RefCell, fmt};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub enum Obj {
+    BoundMethod(Rc<RefCell<BoundMethod>>),
+    Class(Rc<RefCell<Class>>),
     Closure(Rc<RefCell<Closure>>),
     Function(Rc<RefCell<Function>>),
+    Instance(Rc<RefCell<Instance>>),
     NativeFn(Rc<NativeFn>),
     String(String),
     Upvalue(Rc<RefCell<Upvalue>>)
@@ -66,6 +70,7 @@ impl NativeFn {
     }
 }
 
+#[derive(PartialEq)]
 pub struct Closure {
     pub function: Rc<RefCell<Function>>,
     pub upvalues: Vec<Rc<RefCell<Upvalue>>>
@@ -80,6 +85,7 @@ impl Closure {
     }
 }
 
+#[derive(PartialEq)]
 pub struct Upvalue {
     pub location: Rc<Value>,
     pub closed: Value,
@@ -92,6 +98,50 @@ impl Upvalue {
             location: slot,
             closed: Value::Nil,
             next: None
+        }
+    }
+}
+
+#[derive(PartialEq)]
+pub struct Class {
+    pub name: String,
+    pub methods: HashMap<String, Rc<RefCell<Closure>>>
+}
+
+impl Class {
+    pub fn new(name: String) -> Self {
+        Self {
+            name: name,
+            methods: HashMap::new()
+        }
+    }
+}
+
+#[derive(PartialEq)]
+pub struct Instance {
+    pub class: Rc<RefCell<Class>>,
+    pub fields: HashMap<String, Rc<Value>>
+}
+
+impl Instance {
+    pub fn new(class: Rc<RefCell<Class>>) -> Self {
+        Self {
+            class: class,
+            fields: HashMap::new()
+        }
+    }
+}
+
+pub struct BoundMethod {
+    pub receiver: Rc<Value>,
+    pub method: Rc<RefCell<Closure>>
+}
+
+impl BoundMethod {
+    pub fn new(receiver: Rc<Value>, method: Rc<RefCell<Closure>>) -> Self {
+        Self {
+            receiver: receiver,
+            method: method
         }
     }
 }

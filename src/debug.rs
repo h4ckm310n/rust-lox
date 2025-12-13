@@ -52,6 +52,12 @@ pub fn disassemble_instruction(chunk: Rc<RefCell<Chunk>>, mut offset: usize) -> 
         OpCode::SetUpvalue => {
             byte_instruction("OP_SET_UPVALUE", chunk, offset)
         }
+        OpCode::GetProperty => {
+            constant_instruction("OP_GET_PROPERTY", chunk, offset)
+        }
+        OpCode::SetProperty => {
+            constant_instruction("OP_SET_PROPERTY", chunk, offset)
+        }
         OpCode::Equal => {
             simple_instruction("OP_EQUAL", offset)
         }
@@ -94,6 +100,9 @@ pub fn disassemble_instruction(chunk: Rc<RefCell<Chunk>>, mut offset: usize) -> 
         OpCode::Call => {
             byte_instruction("OP_CALL", chunk, offset)
         }
+        OpCode::Invoke => {
+            invoke_instruction("OP_INVOKE", chunk, offset)
+        }
         OpCode::Closure => {
             offset += 1;
             let constant = chunk.borrow().codes[offset];
@@ -116,6 +125,12 @@ pub fn disassemble_instruction(chunk: Rc<RefCell<Chunk>>, mut offset: usize) -> 
         OpCode::Return => {
             simple_instruction("OP_RETURN", offset)
         }
+        OpCode::Class => {
+            constant_instruction("OP_CLASS", chunk, offset)
+        }
+        OpCode::Method => {
+            constant_instruction("OP_METHOD", chunk, offset)
+        }
     }
 }
 
@@ -130,6 +145,13 @@ fn constant_instruction(name: &str, chunk: Rc<RefCell<Chunk>>, offset: usize) ->
     print_value(Rc::new(chunk.borrow().constants.values[constant].clone()));
     println!();
     offset + 2
+}
+
+fn invoke_instruction(name: &str, chunk: Rc<RefCell<Chunk>>, offset: usize) -> usize {
+    let constant = chunk.borrow().codes[offset+1];
+    let arg_count = chunk.borrow().codes[offset+2];
+    println!("{name} ({arg_count} args) {constant}");
+    offset + 3
 }
 
 fn byte_instruction(name: &str, chunk: Rc<RefCell<Chunk>>, offset: usize) -> usize {

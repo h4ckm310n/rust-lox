@@ -1,6 +1,6 @@
 use std::{cell::RefCell, fmt, rc::Rc};
 
-use crate::object::{Closure, Function, NativeFn, Obj};
+use crate::object::{BoundMethod, Class, Closure, Function, Instance, NativeFn, Obj};
 
 #[derive(Clone)]
 pub enum Value {
@@ -30,6 +30,33 @@ impl Value {
     pub fn as_obj(&self) -> Option<Rc<RefCell<Obj>>> {
         if let Self::Obj(obj) = &self {
             Some(obj.clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn as_class(&self) -> Option<Rc<RefCell<Class>>> {
+        if let Some(obj) = self.as_obj() &&
+           let Obj::Class(class) = &*obj.borrow() {
+            Some(class.clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn as_instance(&self) -> Option<Rc<RefCell<Instance>>> {
+        if let Some(obj) = self.as_obj() &&
+           let Obj::Instance(instance) = &*obj.borrow() {
+            Some(instance.clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn as_bound_method(&self) -> Option<Rc<RefCell<BoundMethod>>> {
+        if let Some(obj) = self.as_obj() &&
+           let Obj::BoundMethod(bound_method) = &*obj.borrow() {
+            Some(bound_method.clone())
         } else {
             None
         }
@@ -91,6 +118,18 @@ impl Value {
         self.as_obj().is_some()
     }
 
+    pub fn is_class(&self) -> bool {
+        self.as_class().is_some()
+    }
+
+    pub fn is_instance(&self) -> bool {
+        self.as_instance().is_some()
+    }
+
+    pub fn is_bound_method(&self) -> bool {
+        self.as_bound_method().is_some()
+    }
+
     pub fn is_closure(&self) -> bool {
         self.as_closure().is_some()
     }
@@ -119,6 +158,9 @@ impl fmt::Display for Value {
             Self::Boolean(boolean) => write!(f, "{boolean}"),
             Self::Number(number) => write!(f, "{number}"),
             Self::Obj(obj) => match &*obj.borrow() {
+                Obj::Class(class) => write!(f, "{}", class.borrow().name),
+                Obj::Instance(instance) => write!(f, "{} instance", instance.borrow().class.borrow().name),
+                Obj::BoundMethod(bound_method) => write!(f, "{}", bound_method.borrow().method.borrow().function.borrow()),
                 Obj::Closure(closure) => write!(f, "{}", closure.borrow().function.borrow()),
                 Obj::Function(function) => write!(f, "{}", function.borrow()),
                 Obj::NativeFn(_) => write!(f, "<native fn>"),
@@ -139,6 +181,7 @@ impl PartialEq for Value {
             (Self::Number(l0), Self::Number(r0)) => l0 == r0,
             (Self::Obj(l0), Self::Obj(r0)) => {
                 match (&*l0.borrow(), &*r0.borrow()) {
+                    (Obj::Class(l0), Obj::Class(r0)) => *l0.borrow() == *r0.borrow(),
                     (Obj::Closure(l0), Obj::Closure(r0)) => *l0.borrow().function == *r0.borrow().function,
                     (Obj::Function(l0), Obj::Function(r0)) => *l0 == *r0,
                     (Obj::String(l0), Obj::String(r0)) => *l0 == *r0,

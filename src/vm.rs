@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::{chunk::OpCode, compiler::{Compiler, FunctionType}, debug::disassemble_instruction, object::{Closure, Function, NativeFn, Obj, Upvalue}, value::{Value, print_value}};
+use crate::{chunk::OpCode, compiler::{Compiler, FunctionType}, debug::disassemble_instruction, object::{BoundMethod, Class, Closure, Function, Instance, NativeFn, Obj, Upvalue}, value::{Value, print_value}};
 
 pub struct VM {
     frames: Vec<Rc<RefCell<CallFrame>>>,
@@ -108,6 +108,35 @@ impl VM {
                     let slot = frame.borrow_mut().read_byte() as usize;
                     frame.borrow().closure.borrow_mut().upvalues[slot].borrow_mut().location = self.peek(0);
                 }
+                OpCode::GetProperty => {
+                    let value = self.peek(0);
+                    let instance = if let Some(instance) = value.as_instance() {
+                        instance
+                    } else {
+                        self.runtime_error("Only instances have properties.");
+                        return Err(InterpretError::Runtime);
+                    };
+                    let name = frame.borrow_mut().read_string();
+                    if let Some(value) = instance.borrow().fields.get(&name) {
+                        self.pop_stack();
+                        self.push_stack(value.clone());
+                    } else if self.bind_method(instance.borrow().class.clone(), name) {
+                        return Err(InterpretError::Runtime);
+                    }
+                }
+                OpCode::SetProperty => {
+                    let value = self.peek(1);
+                    let instance = if let Some(instance) = value.as_instance() {
+                        instance
+                    } else {
+                        self.runtime_error("Only instances have properties.");
+                        return Err(InterpretError::Runtime);
+                    };
+                    instance.borrow_mut().fields.insert(frame.borrow_mut().read_string(), self.peek(0));
+                    let value = self.pop_stack().unwrap();
+                    self.pop_stack();
+                    self.push_stack(value);
+                }
                 OpCode::Equal => {
                     let b = self.pop_stack().unwrap();
                     let a = self.pop_stack().unwrap();
@@ -174,6 +203,14 @@ impl VM {
                     }
                     frame = self.frames.last().unwrap().clone();
                 }
+                OpCode::Invoke => {
+                    let method = frame.borrow_mut().read_string();
+                    let arg_count = frame.borrow_mut().read_byte();
+                    if !self.invoke(method, arg_count as usize) {
+                        return Err(InterpretError::Runtime);
+                    }
+                    frame = self.frames.last().unwrap().clone();
+                }
                 OpCode::Closure => {
                     let function = frame.borrow_mut().read_constant().as_function().unwrap();
                     let closure = Rc::new(RefCell::new(Closure::new(function.clone())));
@@ -210,6 +247,14 @@ impl VM {
                     }
                     self.push_stack(result);
                     frame = self.frames.last().unwrap().clone();
+                }
+                OpCode::Class => {
+                    let name = frame.borrow_mut().read_string();
+                    self.push_stack(Rc::new(Value::Obj(Rc::new(RefCell::new(Obj::Class(Rc::new(RefCell::new(Class::new(name)))))))));
+                }
+                OpCode::Method => {
+                    let name = frame.borrow_mut().read_string();
+                    self.define_method(name);
                 }
             };
         }
@@ -248,7 +293,24 @@ impl VM {
 
     fn call_value(&mut self, callee: Rc<Value>, arg_count: usize) -> bool {
         if callee.is_obj() {
-            if callee.is_closure() {
+            if callee.is_bound_method() {
+                let bound = callee.as_bound_method().unwrap();
+                let stack_len = self.stack.borrow().len();
+                self.stack.borrow_mut()[stack_len - arg_count - 1] = bound.borrow().receiver.clone();
+                return self.call(bound.borrow().method.clone(), arg_count);
+            } else if callee.is_class() {
+                let class = callee.as_class().unwrap();
+                let instance = Rc::new(RefCell::new(Instance::new(class.clone())));
+                let stack_len = self.stack.borrow().len();
+                self.stack.borrow_mut()[stack_len - arg_count - 1] = Rc::new(Value::Obj(Rc::new(RefCell::new(Obj::Instance(instance)))));
+                if let Some(initializer) = class.borrow().methods.get(&"init".to_string()) {
+                    return self.call(initializer.clone(), arg_count);
+                } else if arg_count != 0 {
+                    self.runtime_error(&format!("Expected 0 arguments but got {arg_count}."));
+                    return false;
+                }
+                return true;
+            } else if callee.is_closure() {
                 return self.call(callee.as_closure().unwrap(), arg_count);
             } else if callee.is_native() {
                 let native = callee.as_native().unwrap();
@@ -261,6 +323,32 @@ impl VM {
         false
     }
 
+    fn invoke(&mut self, name: String, arg_count: usize) -> bool {
+        let receiver = self.peek(arg_count);
+        let instance = if let Some(instance) = receiver.as_instance() {
+            instance
+        } else {
+            self.runtime_error("Only instances have methods.");
+            return false;
+        };
+        if let Some(value) = instance.borrow().fields.get(&name) {
+            self.stack.borrow_mut()[{self.stack.borrow().len() - arg_count - 1}] = value.clone();
+            return self.call_value(value.clone(), arg_count);
+        }
+        self.invoke_from_class(instance.borrow().class.clone(), name, arg_count)
+    }
+
+    fn invoke_from_class(&mut self, class: Rc<RefCell<Class>>, name: String, arg_count: usize) -> bool {
+        let class = class.borrow();
+        let method = if let Some(method) = class.methods.get(&name) {
+            method
+        } else {
+            self.runtime_error(&format!("Undefined property '{name}'."));
+            return false;
+        };
+        self.call(method.clone(), arg_count)
+    }
+
     fn call(&mut self, closure: Rc<RefCell<Closure>>, arg_count: usize) -> bool {
         let function = &closure.borrow().function;
         if arg_count != function.borrow().arity {
@@ -270,6 +358,18 @@ impl VM {
         let frame = CallFrame::new(self.stack.clone(), closure.clone(), self.stack.borrow().len() - arg_count - 1);
         self.frames.push(Rc::new(RefCell::new(frame)));
         true
+    }
+
+    fn bind_method(&mut self, class: Rc<RefCell<Class>>, name: String) -> bool {
+        if let Some(method) = class.borrow().methods.get(&name) {
+            let bound = Rc::new(RefCell::new(BoundMethod::new(self.peek(0), method.clone())));
+            self.pop_stack();
+            self.push_stack(Rc::new(Value::Obj(Rc::new(RefCell::new(Obj::BoundMethod(bound))))));
+            true
+        } else {
+            self.runtime_error(&format!("Undefined property {name}."));
+            false
+        }
     }
 
     fn capture_upvalue(&mut self, local: Rc<Value>) -> Rc<RefCell<Upvalue>> {
@@ -295,11 +395,17 @@ impl VM {
     fn close_upvalues(&mut self, last_index: usize) {
         let last = &self.stack.borrow()[last_index];
         while let Some(upvalue) = &self.open_upvalues.clone() && { self.compare_values_slot(&upvalue.borrow().location, last) >= 0 } {
-            println!("close upvalue {}", upvalue.borrow().location);
             upvalue.borrow_mut().closed = { (*upvalue.borrow().location).clone() };
             upvalue.borrow_mut().location = { Rc::new(upvalue.borrow().closed.clone()) };
             self.open_upvalues = upvalue.borrow().next.clone();
         }
+    }
+
+    fn define_method(&mut self, name: String) {
+        let method = self.peek(0).as_closure().unwrap();
+        let class = self.peek(1).as_class().unwrap();
+        class.borrow_mut().methods.insert(name, method);
+        self.pop_stack();
     }
 
     fn runtime_error(&mut self, message: &str) {

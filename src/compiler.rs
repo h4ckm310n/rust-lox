@@ -6,6 +6,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 pub struct Compiler {
     weak_self: Option<Weak<RefCell<Self>>>,
     enclosing: Option<Weak<RefCell<Compiler>>>,
+    current_class: RefCell<Option<Rc<RefCell<ClassCompiler>>>>,
     function: Rc<RefCell<Function>>,
     function_type: FunctionType,
     locals: RefCell<[Option<Local>; u8::MAX as usize + 1]>,
@@ -22,6 +23,7 @@ impl Compiler {
         Self {
             weak_self: None,
             enclosing: enclosing,
+            current_class: RefCell::new(None),
             function: Rc::new(RefCell::new(Function::new())),
             function_type: function_type,
             locals: RefCell::new([const { None }; u8::MAX as usize + 1]),
@@ -39,7 +41,11 @@ impl Compiler {
             self.function.borrow_mut().name = String::from_iter(chars);
         }
         self.locals.borrow_mut()[0] = Some(Local {
-            name: Token { token_type: TokenType::Nil, start: 0, length: 0, line: 0 },
+            name: if self.function_type == FunctionType::Function {
+                Token { token_type: TokenType::Nil, start: 0, length: 0, line: 0 }
+            } else {
+                Token { token_type: TokenType::This, start: 0, length: 4, line: 0 }
+            },
             depth: 0,
             is_captured: false
         });
@@ -70,7 +76,9 @@ impl Compiler {
     }
 
     fn declaration(&self) {
-        if { Parser::instance().lock().unwrap().is_match(TokenType::Fun) } {
+        if { Parser::instance().lock().unwrap().is_match(TokenType::Class) } {
+            self.class_declaration();
+        } else if { Parser::instance().lock().unwrap().is_match(TokenType::Fun) } {
             self.fun_declaration();
         } else if { Parser::instance().lock().unwrap().is_match(TokenType::Var) } {
             self.var_declaration();
@@ -80,6 +88,32 @@ impl Compiler {
         if { Parser::instance().lock().unwrap().panic_mode } {
             Parser::instance().lock().unwrap().synchronize();
         }
+    }
+
+    fn class_declaration(&self) {
+        Parser::instance().lock().unwrap().consume(TokenType::Identifier, "Expect class name.");
+        let class_name = { Parser::instance().lock().unwrap().previous.as_ref().unwrap().clone() };
+        let previous = { Parser::instance().lock().unwrap().previous.as_ref().unwrap().clone() };
+        let name_constant = self.identifier_constant(previous);
+        self.declare_variable();
+        self.emit_bytes(OpCode::Class.into(), name_constant);
+        self.define_variable(name_constant);
+        let class_compiler = Rc::new(RefCell::new(ClassCompiler::new(self.current_class.borrow().clone())));
+        *self.current_class.borrow_mut() = Some(class_compiler.clone());
+        self.named_variable(class_name, false);
+        Parser::instance().lock().unwrap().consume(TokenType::LeftBrace, "Expect '{' before class body.");
+        loop {
+            {
+                let parser = Parser::instance().lock().unwrap();
+                if parser.check(TokenType::RightBrace) || parser.check(TokenType::Eof) {
+                    break;
+                }
+            }
+            self.method();
+        }
+        Parser::instance().lock().unwrap().consume(TokenType::RightBrace, "Expect '}' after class body.");
+        self.emit_byte(OpCode::Pop.into());
+        *self.current_class.borrow_mut() = class_compiler.borrow().enclosing.clone();
     }
 
     fn fun_declaration(&self) {
@@ -133,6 +167,9 @@ impl Compiler {
         if { Parser::instance().lock().unwrap().is_match(TokenType::Semicolon) } {
             self.emit_return();
         } else {
+            if self.function_type == FunctionType::Initializer {
+                Parser::instance().lock().unwrap().error("Can't return a value from an initializer.");
+            }
             self.expression();
             Parser::instance().lock().unwrap().consume(TokenType::Semicolon, "Expect ';' after return value.");
             self.emit_byte(OpCode::Return.into());
@@ -198,6 +235,23 @@ impl Compiler {
             self.emit_byte(upvalue.is_local as u8);
             self.emit_byte(upvalue.index as u8);
         }
+    }
+
+    fn method(&self) {
+        Parser::instance().lock().unwrap().consume(TokenType::Identifier, "Expect method name.");
+        let previous = { Parser::instance().lock().unwrap().previous.as_ref().unwrap().clone() };
+        let constant = self.identifier_constant(previous);
+        let function_type = {
+            let parser = Parser::instance().lock().unwrap();
+            let previous = parser.previous.as_ref().unwrap();
+            if String::from_iter(&parser.scanner.source[previous.start..previous.start+previous.length]) == "init" {
+                FunctionType::Initializer
+            } else {
+                FunctionType::Method
+            }
+        };
+        self.function(function_type);
+        self.emit_bytes(OpCode::Method.into(), constant);
     }
 
     fn expression_statement(&self) {
@@ -341,6 +395,30 @@ impl Compiler {
         self.emit_bytes(OpCode::Call.into(), arg_count as u8);
     }
 
+    fn dot(&self, can_assign: bool) {
+        Parser::instance().lock().unwrap().consume(TokenType::Identifier, "Expect property name after '.'.");
+        let previous = { Parser::instance().lock().unwrap().previous.as_ref().unwrap().clone() };
+        let name = self.identifier_constant(previous);
+        if can_assign && { Parser::instance().lock().unwrap().is_match(TokenType::Equal) } {
+            self.expression();
+            self.emit_bytes(OpCode::SetProperty.into(), name);
+        } else if { Parser::instance().lock().unwrap().is_match(TokenType::LeftParen) } {
+            let arg_count = self.argument_list();
+            self.emit_bytes(OpCode::Invoke.into(), name);
+            self.emit_byte(arg_count as u8);
+        } else {
+            self.emit_bytes(OpCode::GetProperty.into(), name);
+        }
+    }
+
+    fn this(&self) {
+        if self.current_class.borrow().is_none() {
+            Parser::instance().lock().unwrap().error("Can't use 'this' outside of a class.");
+            return;
+        }
+        self.variable(false);
+    }
+
     fn literal(&self) {
         let token_type = { Parser::instance().lock().unwrap().previous.clone().unwrap().token_type };
         match token_type {
@@ -464,7 +542,7 @@ impl Compiler {
         let locals = self.locals.borrow();
         for i in (0..*self.local_count.borrow()).rev() {
             let local = locals[i].as_ref().unwrap();
-            if self.identifiers_equal(name, &local.name) {
+            if self.identifiers_equal(name, &local.name) || { Parser::instance().lock().unwrap().scanner.source[name.start..name.start+name.length] == ['t', 'h', 'i', 's'] && local.name.token_type == TokenType::This }  {
                 if local.depth == -1 {
                     Parser::instance().lock().unwrap().error("Can't read local variable in its own initializer.");
                 }
@@ -594,7 +672,7 @@ impl Compiler {
             TokenType::LeftBrace => (None, None, Precedence::None),
             TokenType::RightBrace => (None, None, Precedence::None),
             TokenType::Comma => (None, None, Precedence::None),
-            TokenType::Dot => (None, None, Precedence::None),
+            TokenType::Dot => (None, Some("dot".to_string()), Precedence::Call),
             TokenType::Minus => (Some("unary".to_string()), Some("binary".to_string()), Precedence::Term),
             TokenType::Plus => (None, Some("binary".to_string()), Precedence::Term),
             TokenType::Semicolon => (None, None, Precedence::None),
@@ -622,7 +700,7 @@ impl Compiler {
             TokenType::Print => (None, None, Precedence::None),
             TokenType::Return => (None, None, Precedence::None),
             TokenType::Super => (None, None, Precedence::None),
-            TokenType::This => (None, None, Precedence::None),
+            TokenType::This => (Some("this".to_string()), None, Precedence::None),
             TokenType::Var => (None, None, Precedence::None),
             TokenType::Class => (None, None, Precedence::None),
             TokenType::Fun => (None, None, Precedence::None),
@@ -643,6 +721,8 @@ impl Compiler {
             "variable" => self.variable(can_assign),
             "and" => self.and(),
             "or" => self.or(),
+            "dot" => self.dot(can_assign),
+            "this" => self.this(),
             _ => ()
         }
     }
@@ -680,7 +760,11 @@ impl Compiler {
     }
 
     fn emit_return(&self) {
-        self.emit_byte(OpCode::Nil.into());
+        if self.function_type == FunctionType::Initializer {
+            self.emit_bytes(OpCode::GetLocal.into(), 0);
+        } else {
+            self.emit_byte(OpCode::Nil.into());
+        }
         self.emit_byte(OpCode::Return.into());
     }
 
@@ -717,6 +801,18 @@ impl Compiler {
     fn end(&self) -> Rc<RefCell<Function>> {
         self.emit_return();
         self.function.clone()
+    }
+}
+
+struct ClassCompiler {
+    enclosing: Option<Rc<RefCell<ClassCompiler>>>
+}
+
+impl ClassCompiler {
+    fn new(enclosing: Option<Rc<RefCell<ClassCompiler>>>) -> Self {
+        Self {
+            enclosing: enclosing
+        }
     }
 }
 
@@ -871,5 +967,7 @@ struct Upvalue {
 #[derive(PartialEq)]
 pub enum FunctionType {
     Function,
+    Initializer,
+    Method,
     Script
 }
