@@ -835,6 +835,10 @@ impl Compiler {
 
     fn make_constant(&self, value: Value) -> u8 {
         let constant = self.function.borrow().chunk.borrow_mut().add_constant(value);
+        if constant > u8::MAX as usize {
+            Parser::instance().lock().unwrap().error("Too many constants in one chunk.");
+            return 0;
+        }
         constant as u8
     }
 

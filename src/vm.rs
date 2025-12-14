@@ -173,9 +173,9 @@ impl VM {
                     self.push_stack(Rc::new(Value::Boolean(is_falsey(value))));
                 }
                 OpCode::Negate => {
-                    let rc_stack = self.stack.clone();
-                    let stack = rc_stack.borrow();
-                    let value = stack.last().unwrap().clone();
+                    let value = {
+                        self.stack.borrow_mut().last().unwrap().clone()
+                    };
                     if let Some(number) = value.as_number() {
                         self.pop_stack();
                         self.push_stack(Rc::new(Value::Number(-number)));
@@ -343,7 +343,10 @@ impl VM {
                 return self.call(callee.as_closure().unwrap(), arg_count);
             } else if callee.is_native() {
                 let native = callee.as_native().unwrap();
-                let result = native.call(arg_count, self.stack.borrow()[self.stack.borrow().len()-arg_count+1..].to_vec());
+                let result = native.call(arg_count, self.stack.borrow()[self.stack.borrow().len()-arg_count..].to_vec());
+                for _ in 0..arg_count+1 {
+                    self.pop_stack();
+                }
                 self.push_stack(result);
                 return true;
             }

@@ -46,6 +46,7 @@ impl Scanner {
             '-' => { return Ok(self.make_token(TokenType::Minus)); }
             '+' => { return Ok(self.make_token(TokenType::Plus)); }
             ';' => { return Ok(self.make_token(TokenType::Semicolon)); }
+            '/' => { return Ok(self.make_token(TokenType::Slash)); }
             '*' => { return Ok(self.make_token(TokenType::Star)); }
 
             // equal
@@ -61,7 +62,8 @@ impl Scanner {
                     return Ok(self.make_token(TokenType::EqualEqual));
                 } else {
                     return Ok(self.make_token(TokenType::Equal));
-                }}
+                }
+            }
             '<' => {
                 if self.is_match('=') {
                     return Ok(self.make_token(TokenType::LessEqual));
