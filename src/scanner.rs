@@ -85,6 +85,18 @@ impl Scanner {
                     while self.peek() != '\n' && !self.is_end() {
                         self.next_char();
                     }
+                } else if self.is_match('*') {
+                    loop {
+                        if self.is_end() {
+                            break;
+                        }
+                        if self.is_match('*') {
+                            if self.is_match('/') || self.is_end() {
+                                break;
+                            }
+                        }
+                        self.next_char();
+                    }
                 } else {
                     self.add_token(TokenType::Slash, None);
                 }
