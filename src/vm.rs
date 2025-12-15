@@ -35,7 +35,7 @@ impl VM {
         let function = compiler.borrow().compile();
         if let Some(function) = function {
             let closure = Rc::new(RefCell::new(Closure::new(function)));
-            self.push_stack(Rc::new(Value::Obj(Rc::new(RefCell::new(Obj::Closure(closure.clone()))))));
+            self.push_stack(Rc::new(Value::Obj(Rc::new(Obj::Closure(closure.clone())))));
             self.call(closure, 0);
             self.run()
         }
@@ -231,7 +231,7 @@ impl VM {
                 OpCode::Closure => {
                     let function = frame.borrow_mut().read_constant().as_function().unwrap();
                     let closure = Rc::new(RefCell::new(Closure::new(function.clone())));
-                    self.push_stack(Rc::new(Value::Obj(Rc::new(RefCell::new(Obj::Closure(closure.clone()))))));
+                    self.push_stack(Rc::new(Value::Obj(Rc::new(Obj::Closure(closure.clone())))));
                     for i in 0..function.borrow().upvalue_count {
                         let is_local = frame.borrow_mut().read_byte();
                         let index = frame.borrow_mut().read_byte() as usize;
@@ -267,7 +267,7 @@ impl VM {
                 }
                 OpCode::Class => {
                     let name = frame.borrow_mut().read_string();
-                    self.push_stack(Rc::new(Value::Obj(Rc::new(RefCell::new(Obj::Class(Rc::new(RefCell::new(Class::new(name)))))))));
+                    self.push_stack(Rc::new(Value::Obj(Rc::new(Obj::Class(Rc::new(RefCell::new(Class::new(name))))))));
                 }
                 OpCode::Inherit => {
                     let superclass = self.peek(1);
@@ -311,7 +311,7 @@ impl VM {
     fn concatenate(&mut self) {
         let b = self.pop_stack().unwrap().as_string().unwrap();
         let a = self.pop_stack().unwrap().as_string().unwrap();
-        self.push_stack(Rc::new(Value::Obj(Rc::new(RefCell::new(Obj::String(a + &b))))));
+        self.push_stack(Rc::new(Value::Obj(Rc::new(Obj::String(a + &b)))));
     }
 
     fn peek(&mut self, distance: usize) -> Rc<Value> {
@@ -331,7 +331,7 @@ impl VM {
                 let class = callee.as_class().unwrap();
                 let instance = Rc::new(RefCell::new(Instance::new(class.clone())));
                 let stack_len = self.stack.borrow().len();
-                self.stack.borrow_mut()[stack_len - arg_count - 1] = Rc::new(Value::Obj(Rc::new(RefCell::new(Obj::Instance(instance)))));
+                self.stack.borrow_mut()[stack_len - arg_count - 1] = Rc::new(Value::Obj(Rc::new(Obj::Instance(instance))));
                 if let Some(initializer) = class.borrow().methods.get(&"init".to_string()) {
                     return self.call(initializer.clone(), arg_count);
                 } else if arg_count != 0 {
@@ -396,7 +396,7 @@ impl VM {
         if let Some(method) = class.borrow().methods.get(&name) {
             let bound = Rc::new(RefCell::new(BoundMethod::new(self.peek(0), method.clone())));
             self.pop_stack();
-            self.push_stack(Rc::new(Value::Obj(Rc::new(RefCell::new(Obj::BoundMethod(bound))))));
+            self.push_stack(Rc::new(Value::Obj(Rc::new(Obj::BoundMethod(bound)))));
             true
         } else {
             self.runtime_error(&format!("Undefined property {name}."));
@@ -458,8 +458,8 @@ impl VM {
     }
 
     fn define_native(&mut self, name: String, function: NativeFn) {
-        let value = Rc::new(Value::Obj(Rc::new(RefCell::new(Obj::NativeFn(Rc::new(function))))));
-        self.push_stack(Rc::new(Value::Obj(Rc::new(RefCell::new(Obj::String(name.clone()))))));
+        let value = Rc::new(Value::Obj(Rc::new(Obj::NativeFn(Rc::new(function)))));
+        self.push_stack(Rc::new(Value::Obj(Rc::new(Obj::String(name.clone())))));
         self.push_stack(value.clone());
         self.globals.insert(name, value);
         self.pop_stack();

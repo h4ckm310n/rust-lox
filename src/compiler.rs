@@ -249,7 +249,7 @@ impl Compiler {
         }
         compiler.borrow().block();
         let function = compiler.borrow().end();
-        let value = self.make_constant(Value::Obj(Rc::new(RefCell::new(Obj::Function(function.clone())))));
+        let value = self.make_constant(Value::Obj(Rc::new(Obj::Function(function.clone()))));
         self.emit_bytes(OpCode::Closure.into(), value);
 
         let upvalues = &compiler.borrow().upvalues;
@@ -484,7 +484,7 @@ impl Compiler {
             let previous = parser.previous.as_ref().unwrap();
             let chars = &parser.scanner.source[previous.start+1..previous.start+previous.length-1];
             let value = String::from_iter(chars);
-            Rc::new(RefCell::new(Obj::String(value)))
+            Rc::new(Obj::String(value))
         };
         self.emit_constant(Value::Obj(obj));
     }
@@ -579,7 +579,7 @@ impl Compiler {
             let chars = { &Parser::instance().lock().unwrap().scanner.source[name.start..name.start+name.length] };
             String::from_iter(chars)
         };
-        self.make_constant(Value::Obj(Rc::new(RefCell::new(Obj::String(value)))))
+        self.make_constant(Value::Obj(Rc::new(Obj::String(value))))
     }
 
     fn identifiers_equal(&self, a: &Token, b: &Token) -> bool {

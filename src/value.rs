@@ -7,7 +7,7 @@ pub enum Value {
     Nil,
     Boolean(bool),
     Number(f64),
-    Obj(Rc<RefCell<Obj>>)
+    Obj(Rc<Obj>)
 }
 
 impl Value {
@@ -27,7 +27,7 @@ impl Value {
         }
     }
 
-    pub fn as_obj(&self) -> Option<Rc<RefCell<Obj>>> {
+    pub fn as_obj(&self) -> Option<Rc<Obj>> {
         if let Self::Obj(obj) = &self {
             Some(obj.clone())
         } else {
@@ -37,7 +37,7 @@ impl Value {
 
     pub fn as_class(&self) -> Option<Rc<RefCell<Class>>> {
         if let Some(obj) = self.as_obj() &&
-           let Obj::Class(class) = &*obj.borrow() {
+           let Obj::Class(class) = &*obj {
             Some(class.clone())
         } else {
             None
@@ -46,7 +46,7 @@ impl Value {
 
     pub fn as_instance(&self) -> Option<Rc<RefCell<Instance>>> {
         if let Some(obj) = self.as_obj() &&
-           let Obj::Instance(instance) = &*obj.borrow() {
+           let Obj::Instance(instance) = &*obj {
             Some(instance.clone())
         } else {
             None
@@ -55,7 +55,7 @@ impl Value {
 
     pub fn as_bound_method(&self) -> Option<Rc<RefCell<BoundMethod>>> {
         if let Some(obj) = self.as_obj() &&
-           let Obj::BoundMethod(bound_method) = &*obj.borrow() {
+           let Obj::BoundMethod(bound_method) = &*obj {
             Some(bound_method.clone())
         } else {
             None
@@ -64,7 +64,7 @@ impl Value {
 
     pub fn as_closure(&self) -> Option<Rc<RefCell<Closure>>> {
         if let Some(obj) = self.as_obj() &&
-           let Obj::Closure(closure) = &*obj.borrow() {
+           let Obj::Closure(closure) = &*obj {
             Some(closure.clone())
         } else {
             None
@@ -73,7 +73,7 @@ impl Value {
 
     pub fn as_function(&self) -> Option<Rc<RefCell<Function>>> {
         if let Some(obj) = self.as_obj() &&
-           let Obj::Function(function) = &*obj.borrow() {
+           let Obj::Function(function) = &*obj {
             Some(function.clone())
         } else {
             None
@@ -82,7 +82,7 @@ impl Value {
 
     pub fn as_native(&self) -> Option<Rc<NativeFn>> {
         if let Some(obj) = self.as_obj() &&
-           let Obj::NativeFn(native_fn) = &*obj.borrow() {
+           let Obj::NativeFn(native_fn) = &*obj {
             Some(native_fn.clone())
         } else {
             None
@@ -91,7 +91,7 @@ impl Value {
 
     pub fn as_string(&self) -> Option<String> {
         if let Some(obj) = self.as_obj() &&
-           let Obj::String(string) = &*obj.borrow() {
+           let Obj::String(string) = &*obj {
             Some(string.clone())
         } else {
             None
@@ -157,7 +157,7 @@ impl fmt::Display for Value {
             Self::Nil => write!(f, "nil"),
             Self::Boolean(boolean) => write!(f, "{boolean}"),
             Self::Number(number) => write!(f, "{number}"),
-            Self::Obj(obj) => match &*obj.borrow() {
+            Self::Obj(obj) => match obj.as_ref() {
                 Obj::Class(class) => write!(f, "{}", class.borrow().name),
                 Obj::Instance(instance) => write!(f, "{} instance", instance.borrow().class.borrow().name),
                 Obj::BoundMethod(bound_method) => write!(f, "{}", bound_method.borrow().method.borrow().function.borrow()),
@@ -180,7 +180,7 @@ impl PartialEq for Value {
             (Self::Boolean(l0), Self::Boolean(r0)) => l0 == r0,
             (Self::Number(l0), Self::Number(r0)) => l0 == r0,
             (Self::Obj(l0), Self::Obj(r0)) => {
-                match (&*l0.borrow(), &*r0.borrow()) {
+                match (l0.as_ref(), r0.as_ref()) {
                     (Obj::Class(l0), Obj::Class(r0)) => *l0.borrow() == *r0.borrow(),
                     (Obj::Closure(l0), Obj::Closure(r0)) => *l0.borrow().function == *r0.borrow().function,
                     (Obj::Function(l0), Obj::Function(r0)) => *l0 == *r0,
