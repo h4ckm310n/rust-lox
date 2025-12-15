@@ -70,7 +70,23 @@ impl Chunk {
     }
 
     pub fn add_constant(&mut self, value: Value) -> usize {
+        let i = self.find_exist_string(&value);
+        if i != -1 {
+            return i as usize;
+        }
         self.constants.write(value);
         self.constants.count() - 1
+    }
+
+    pub fn find_exist_string(&self, value: &Value) -> isize {
+        if !value.is_string() {
+            return -1;
+        }
+        for i in 0..self.constants.values.len() {
+            if let Some(value_) = self.constants.values[i].as_string() && value_ == value.as_string().unwrap() {
+                return i as isize;
+            }
+        }
+        -1
     }
 }
