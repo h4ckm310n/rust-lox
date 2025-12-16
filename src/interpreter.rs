@@ -61,6 +61,9 @@ impl Visitor for Interpreter {
             },
             TokenType::Slash => {
                 self.check_number_operands(&binary_expr.op, lhs, rhs)?;
+                if rhs.to_number().unwrap() == 0.0 {
+                    return Err(ErrType::Err(binary_expr.op.clone(), "Cannot divide by 0.".to_string()));
+                }
                 let result = lhs.to_number().unwrap() / rhs.to_number().unwrap();
                 return Ok(Some(Value::Number(result)));
             },
