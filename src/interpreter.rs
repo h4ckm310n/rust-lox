@@ -76,6 +76,12 @@ impl Visitor for Interpreter {
                 } else if let (Some(lhs), Some(rhs)) = (lhs.to_string(), rhs.to_string()) {
                     let result = lhs + &rhs;
                     return Ok(Some(Value::String(result)));
+                } else if let (Some(lhs), Some(rhs)) = (lhs.to_number(), rhs.to_string()) {
+                    let result = lhs.to_string() + &rhs;
+                    return Ok(Some(Value::String(result)));
+                } else if let (Some(lhs), Some(rhs)) = (lhs.to_string(), rhs.to_number()) {
+                    let result = lhs + &rhs.to_string();
+                    return Ok(Some(Value::String(result)));
                 } else {
                     return Err(ErrType::Err(binary_expr.op.clone(), "Operands must be two numbers or two strings.".to_string()));
                 }
