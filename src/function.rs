@@ -19,7 +19,7 @@ impl Function {
 
     pub fn bind(&self, instance: Rc<RefCell<Instance>>) -> Self {
         let environment = Rc::new(RefCell::new(Environment::new(Some(self.closure.clone()))));
-        environment.borrow_mut().define("this".to_string(), Value::Instance(instance));
+        environment.borrow_mut().define("this".to_string(), Rc::new(Value::Instance(instance)));
         Self {
             decl: self.decl.clone(),
             closure: environment.clone(),
@@ -29,12 +29,12 @@ impl Function {
 }
 
 impl Callable for Function {
-    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Value {
+    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Rc<Value>>) -> Rc<Value> {
         let environment = Rc::new(RefCell::new(Environment::new(Some(self.closure.clone()))));
         for i in 0..self.decl.params.len() {
             environment.borrow_mut().define(
-                self.decl.params.get(i).unwrap().text.clone(), 
-                arguments.get(i).unwrap().to_owned());
+                self.decl.params[i].text.clone(), 
+                arguments[i].clone());
         }
         let result = interpreter.execute_block(&self.decl.body, environment);
         if let Err(ErrType::Return(value)) = result {            
@@ -46,7 +46,7 @@ impl Callable for Function {
         if self.is_initializer {
             return self.closure.borrow().get_at(0, "this".to_string());
         }
-        Value::Nil
+        Rc::new(Value::Nil)
     }
 
     fn arity(&self) -> usize {

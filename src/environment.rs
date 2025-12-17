@@ -8,7 +8,7 @@ use crate::token::Token;
 #[derive(PartialEq)]
 pub struct Environment {
     pub enclosing: Option<Rc<RefCell<Environment>>>,
-    values: HashMap<String, Value>
+    values: HashMap<String, Rc<Value>>
 }
 
 impl Environment {
@@ -19,13 +19,13 @@ impl Environment {
         }
     }
 
-    pub fn define(&mut self, name: String, value: Value) {
+    pub fn define(&mut self, name: String, value: Rc<Value>) {
         self.values.insert(name, value);
     }
 
-    pub fn get(&self, name: &Token) -> Result<Value, (Token, String)> {
+    pub fn get(&self, name: &Token) -> Result<Rc<Value>, (Token, String)> {
         if let Some(value) = self.values.get(&name.text) {
-            return Ok(value.to_owned());
+            return Ok(value.clone());
         }
         
         if let Some(enclosing) = &self.enclosing {
@@ -34,7 +34,7 @@ impl Environment {
         Err((name.clone(), format!("Undefined variable '{}'.", name.text)))
     }
 
-    pub fn assign(&mut self, name: &Token, value: Value) -> Result<(), (Token, String)> {
+    pub fn assign(&mut self, name: &Token, value: Rc<Value>) -> Result<(), (Token, String)> {
         if self.values.contains_key(&name.text) {
             self.values.insert(name.text.clone(), value);
             return Ok(());
@@ -46,19 +46,19 @@ impl Environment {
         Err((name.clone(), format!("Undefined variable '{}'.", name.text)))
     }
 
-    pub fn assign_at(&mut self, distance: usize, name: &Token, value: Value) {
+    pub fn assign_at(&mut self, distance: usize, name: &Token, value: Rc<Value>) {
         if distance == 0 {
             self.values.insert(name.text.clone(), value);
         } else {
-            self.ancestor(distance).borrow_mut().values.insert(name.text.clone(), value);
+            self.ancestor(distance).borrow_mut().values.insert(name.text.clone(),  value);
         }
     }
 
-    pub fn get_at(&self, distance: usize, name: String) -> Value {
+    pub fn get_at(&self, distance: usize, name: String) -> Rc<Value> {
         if distance == 0 {
-            self.values.get(&name).unwrap().to_owned()
+            self.values.get(&name).unwrap().clone()
         } else {
-            self.ancestor(distance).borrow().values.get(&name).unwrap().to_owned()
+            self.ancestor(distance).borrow().values.get(&name).unwrap().clone()
         }
     }
 

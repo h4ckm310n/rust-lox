@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use crate::callable::Callable;
 use crate::function::Function;
@@ -8,12 +8,11 @@ use crate::instance::Instance;
 use crate::interpreter::*;
 
 
-#[derive(PartialEq)]
 pub struct Class {
     pub name: String,
     methods: HashMap<String, Rc<RefCell<Function>>>,
     superclass: Option<Rc<RefCell<Class>>>,
-    rc_self: Option<Rc<RefCell<Self>>>
+    weak_self: Option<Weak<RefCell<Self>>>
 }
 
 impl Class {
@@ -22,16 +21,16 @@ impl Class {
            name: name,
            methods: methods,
            superclass: superclass,
-           rc_self: None
+           weak_self: None
         }
     }
 
-    pub fn set_rc_self(&mut self, rc_self: Rc<RefCell<Self>>) {
-        self.rc_self = Some(rc_self);
+    pub fn set_weak_self(&mut self, weak_self: Weak<RefCell<Self>>) {
+        self.weak_self = Some(weak_self);
     }
 
-    pub fn unset_rc_self(&mut self) {
-        self.rc_self = None;
+    pub fn unset_weak_self(&mut self) {
+        self.weak_self = None;
     }
 
     pub fn find_method(&self, name: String) -> Option<Rc<RefCell<Function>>> {
@@ -46,14 +45,14 @@ impl Class {
 }
 
 impl Callable for Class {
-    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Value {
-        let instance = Rc::new(RefCell::new(Instance::new(self.rc_self.as_ref().unwrap().clone())));
-        instance.borrow_mut().set_rc_self(instance.clone());
+    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Rc<Value>>) -> Rc<Value> {
+        let instance = Rc::new(RefCell::new(Instance::new(self.weak_self.as_ref().unwrap().clone())));
+        instance.borrow_mut().set_weak_self(Rc::downgrade(&instance));
         let initializer = self.find_method("init".to_string());
         if let Some(initializer) = initializer {
             initializer.borrow().bind(instance.clone()).call(interpreter, arguments);
         }
-        Value::Instance(instance)
+        Rc::new(Value::Instance(instance))
     }
 
     fn arity(&self) -> usize {
@@ -71,3 +70,8 @@ impl ToString for Class {
     }
 }
 
+impl PartialEq for Class {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.methods == other.methods && self.superclass == other.superclass
+    }
+}

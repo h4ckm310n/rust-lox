@@ -18,11 +18,11 @@ pub struct Interpreter {
 }
 
 impl Visitor for Interpreter {
-    type R = Value;
+    type R = Rc<Value>;
     type E = ErrType;
 
     fn visit_literal_expr(&mut self, literal_expr: &LiteralExpr) -> Result<Option<Self::R>, Self::E> {
-        Ok(Some(Value::literal_to_value(&literal_expr.content)))
+        Ok(Some(Rc::new(Value::literal_to_value(&literal_expr.content))))
     }
 
     fn visit_unary_expr(&mut self, unary_expr: &UnaryExpr) -> Result<Option<Self::R>, Self::E> {
@@ -35,10 +35,10 @@ impl Visitor for Interpreter {
         match unary_expr.op.token_type {
             TokenType::Minus => {
                 self.check_number_operand(&unary_expr.op, &value)?;
-                return Ok(Some(Value::Number(-value.to_number().unwrap())));
+                return Ok(Some(Rc::new(Value::Number(-value.to_number().unwrap()))));
             },
             TokenType::Bang => {
-                return Ok(Some(Value::Bool(!self.is_truthy(value))));
+                return Ok(Some(Rc::new(Value::Bool(!self.is_truthy(value)))));
             },
             _ => {}
         };
@@ -57,7 +57,7 @@ impl Visitor for Interpreter {
             TokenType::Minus => {
                 self.check_number_operands(&binary_expr.op, lhs, rhs)?;
                 let result = lhs.to_number().unwrap() - rhs.to_number().unwrap();
-                return Ok(Some(Value::Number(result)));
+                return Ok(Some(Rc::new(Value::Number(result))));
             },
             TokenType::Slash => {
                 self.check_number_operands(&binary_expr.op, lhs, rhs)?;
@@ -65,26 +65,26 @@ impl Visitor for Interpreter {
                     return Err(ErrType::Err(binary_expr.op.clone(), "Cannot divide by 0.".to_string()));
                 }
                 let result = lhs.to_number().unwrap() / rhs.to_number().unwrap();
-                return Ok(Some(Value::Number(result)));
+                return Ok(Some(Rc::new(Value::Number(result))));
             },
             TokenType::Star => {
                 self.check_number_operands(&binary_expr.op, lhs, rhs)?;
                 let result = lhs.to_number().unwrap() * rhs.to_number().unwrap();
-                return Ok(Some(Value::Number(result)));
+                return Ok(Some(Rc::new(Value::Number(result))));
             },
             TokenType::Plus => {
                 if let (Some(lhs), Some(rhs)) = (lhs.to_number(), rhs.to_number()) {
                     let result = lhs + rhs;
-                    return Ok(Some(Value::Number(result)));
+                    return Ok(Some(Rc::new(Value::Number(result))));
                 } else if let (Some(lhs), Some(rhs)) = (lhs.to_string(), rhs.to_string()) {
                     let result = lhs + &rhs;
-                    return Ok(Some(Value::String(result)));
+                    return Ok(Some(Rc::new(Value::String(result))));
                 } else if let (Some(lhs), Some(rhs)) = (lhs.to_number(), rhs.to_string()) {
                     let result = lhs.to_string() + &rhs;
-                    return Ok(Some(Value::String(result)));
+                    return Ok(Some(Rc::new(Value::String(result))));
                 } else if let (Some(lhs), Some(rhs)) = (lhs.to_string(), rhs.to_number()) {
                     let result = lhs + &rhs.to_string();
-                    return Ok(Some(Value::String(result)));
+                    return Ok(Some(Rc::new(Value::String(result))));
                 } else {
                     return Err(ErrType::Err(binary_expr.op.clone(), "Operands must be two numbers or two strings.".to_string()));
                 }
@@ -93,29 +93,29 @@ impl Visitor for Interpreter {
             TokenType::Greater => {
                 self.check_number_operands(&binary_expr.op, lhs, rhs)?;
                 let result = lhs.to_number().unwrap() > rhs.to_number().unwrap();
-                return Ok(Some(Value::Bool(result)));
+                return Ok(Some(Rc::new(Value::Bool(result))));
             },
             TokenType::GreaterEqual => {
                 self.check_number_operands(&binary_expr.op, lhs, rhs)?;
                 let result = lhs.to_number().unwrap() >= rhs.to_number().unwrap();
-                return Ok(Some(Value::Bool(result)));
+                return Ok(Some(Rc::new(Value::Bool(result))));
             },
             TokenType::Less => {
                 self.check_number_operands(&binary_expr.op, lhs, rhs)?;
                 let result = lhs.to_number().unwrap() < rhs.to_number().unwrap();
-                return Ok(Some(Value::Bool(result)));
+                return Ok(Some(Rc::new(Value::Bool(result))));
             },
             TokenType::LessEqual => {
                 self.check_number_operands(&binary_expr.op, lhs, rhs)?;
                 let result = lhs.to_number().unwrap() <= rhs.to_number().unwrap();
-                return Ok(Some(Value::Bool(result)));
+                return Ok(Some(Rc::new(Value::Bool(result))));
             },
 
             TokenType::BangEqual => {
-                return Ok(Some(Value::Bool(!self.is_equal(lhs, rhs))));
+                return Ok(Some(Rc::new(Value::Bool(!self.is_equal(lhs, rhs)))));
             },
             TokenType::EqualEqual => {
-                return Ok(Some(Value::Bool(self.is_equal(lhs, rhs))));
+                return Ok(Some(Rc::new(Value::Bool(self.is_equal(lhs, rhs)))));
             }
 
             _ => {}
@@ -129,13 +129,13 @@ impl Visitor for Interpreter {
             if let Some(value) = self.visit_expr(&assign_expr.value)? {
                 value
             } else {
-                Value::Nil
+                Rc::new(Value::Nil)
             }
         };
         if let Some(distance) = self.locals.get(&Expr::Assign(assign_expr.to_owned())) {
-            self.environment.borrow_mut().assign_at(*distance, &assign_expr.name, value.to_owned());
+            self.environment.borrow_mut().assign_at(*distance, &assign_expr.name, value.clone());
         }
-        else if let Err((token, message)) = self.environment.borrow_mut().assign(&assign_expr.name, value.to_owned()) {
+        else if let Err((token, message)) = self.environment.borrow_mut().assign(&assign_expr.name, value.clone()) {
             return Err(ErrType::Err(token, message));
         };
         Ok(Some(value))
@@ -145,11 +145,11 @@ impl Visitor for Interpreter {
         let left = self.visit_expr(&logical_expr.lhs)?;
         if let Some(left) = left {
             if logical_expr.operator.token_type == TokenType::Or {
-                if self.is_truthy(left.to_owned()) {
+                if self.is_truthy(left.clone()) {
                     return Ok(Some(left));
                 }
             } else {
-                if !self.is_truthy(left.to_owned()) {
+                if !self.is_truthy(left.clone()) {
                     return Ok(Some(left));
                 }
             }
@@ -159,7 +159,7 @@ impl Visitor for Interpreter {
 
     fn visit_call_expr(&mut self, call_expr: &CallExpr) -> Result<Option<Self::R>, Self::E> {
         if let Expr::Identifier(identifier) = &*call_expr.name && identifier.name.text == "clock" {
-            return Ok(Some(Value::Number(SystemTime::now().duration_since(UNIX_EPOCH).expect("").as_secs_f64())));
+            return Ok(Some(Rc::new(Value::Number(SystemTime::now().duration_since(UNIX_EPOCH).expect("").as_secs_f64()))));
         }
         let callee = self.visit_expr(&call_expr.name)?;
         let callable = if callee.is_some() && let Some(callable) = callee.unwrap().to_callable() {
@@ -179,7 +179,7 @@ impl Visitor for Interpreter {
 
     fn visit_get_expr(&mut self, get_expr: &GetExpr) -> Result<Option<Self::R>, Self::E> {
         let object = self.visit_expr(&get_expr.object)?;
-        if object.is_some() && let Value::Instance(instance) = object.as_ref().unwrap() {
+        if object.is_some() && let Value::Instance(instance) = &*object.unwrap() {
             let binding = instance.borrow();
             let field = binding.get(&get_expr.name)?;
             return Ok(Some(field));
@@ -201,7 +201,7 @@ impl Visitor for Interpreter {
 
     fn visit_identifier(&mut self, identifier: &Identifier) -> Result<Option<Self::R>, Self::E> {
         if identifier.name.text == "clock" {
-            return Ok(Some(Value::String("<native fn>".to_string())));
+            return Ok(Some(Rc::new(Value::String("<native fn>".to_string()))));
         }
         Ok(self.look_up_variable(&identifier.name, Expr::Identifier(identifier.to_owned()))?)
     }
@@ -214,10 +214,10 @@ impl Visitor for Interpreter {
         let distance = self.locals.get(&Expr::Super(super_expr.to_owned())).unwrap();
         let superclass = self.environment.borrow().get_at(*distance, "super".to_string());
         let instance = self.environment.borrow().get_at(*distance-1, "this".to_string());
-        if let (Value::Class(superclass), Value::Instance(instance)) = (superclass, instance) {
+        if let (Value::Class(superclass), Value::Instance(instance)) = (&*superclass, &*instance) {
             let method = superclass.borrow().find_method(super_expr.method.text.clone());
             if let Some(method) = method {
-                return Ok(Some(Value::Function(Rc::new(RefCell::new(method.borrow().bind(instance))))));
+                return Ok(Some(Rc::new(Value::Function(Rc::new(RefCell::new(method.borrow().bind(instance.clone())))))));
             } else {
                 return Err(ErrType::Err(super_expr.method.clone(), format!("Undefined property'{}'.", super_expr.method.text)));
             }
@@ -234,7 +234,7 @@ impl Visitor for Interpreter {
             {
                 value
             } else {
-                Value::Nil
+                Rc::new(Value::Nil)
             }
         };
         self.environment.borrow_mut().define(var_decl.name.text.clone(), value);
@@ -245,15 +245,15 @@ impl Visitor for Interpreter {
         let function = Function::new(fun_decl.clone(), self.environment.clone(), false);
         self.environment.borrow_mut().define(
             fun_decl.name.text.clone(), 
-            Value::Function(Rc::new(RefCell::new(function))));
+            Rc::new(Value::Function(Rc::new(RefCell::new(function)))));
         Ok(None)
     }
 
     fn visit_class_decl(&mut self, class_decl: &ClassDecl) -> Result<Option<Self::R>, Self::E> {
         let superclass = if let Some(identifier) = &class_decl.superclass {
             let superclass = self.visit_identifier(identifier)?;
-            if let Some(superclass) = superclass && let Value::Class(superclass) = superclass {
-                Some(superclass)
+            if let Some(superclass) = superclass && let Value::Class(superclass) = &*superclass {
+                Some(superclass.clone())
             } else {
                 return Err(ErrType::Err(identifier.name.clone(), "Superclass must be a class.".to_string()));
             }
@@ -261,11 +261,11 @@ impl Visitor for Interpreter {
             None
         };
 
-        self.environment.borrow_mut().define(class_decl.name.text.clone(), Value::Nil);
+        self.environment.borrow_mut().define(class_decl.name.text.clone(), Rc::new(Value::Nil));
 
-        if let Some(superclass) = superclass.as_ref() {
+        if let Some(superclass) = &superclass {
             self.environment = Rc::new(RefCell::new(Environment::new(Some(self.environment.clone()))));
-            self.environment.borrow_mut().define("super".to_string(), Value::Class(superclass.clone()));
+            self.environment.borrow_mut().define("super".to_string(), Rc::new(Value::Class(superclass.clone())));
         }
 
         let mut methods = HashMap::new();
@@ -275,8 +275,8 @@ impl Visitor for Interpreter {
             methods.insert(method.name.text.clone(), Rc::new(RefCell::new(function)));
         }
 
-        let class = Rc::new(RefCell::new(Class::new(class_decl.name.text.clone(), methods, superclass.to_owned())));
-        class.borrow_mut().set_rc_self(class.clone());
+        let class = Rc::new(RefCell::new(Class::new(class_decl.name.text.clone(), methods, superclass.clone())));
+        class.borrow_mut().set_weak_self(Rc::downgrade(&class));
         
         if superclass.is_some() {
             let enclosing = self.environment.borrow().enclosing.clone().unwrap();
@@ -286,7 +286,7 @@ impl Visitor for Interpreter {
         if let Err((token, message)) = 
             self.environment.borrow_mut().assign(
                 &class_decl.name, 
-                Value::Class(class.clone())) {
+                Rc::new(Value::Class(class.clone()))) {
             return Err(ErrType::Err(token, message));
         }
         Ok(None)
@@ -319,7 +319,7 @@ impl Visitor for Interpreter {
         let value = if let Some(value) = &return_stmt.value {
             self.visit_expr(value)?.unwrap()
         } else {
-            Value::Nil
+            Rc::new(Value::Nil)
         };
         Err(ErrType::Return(value))
     }
@@ -354,8 +354,8 @@ impl Interpreter {
         }
     }
 
-    fn is_truthy(&self, value: Value) -> bool {
-        match value {
+    fn is_truthy(&self, value: Rc<Value>) -> bool {
+        match *value {
             Value::Bool(value) => value,
             Value::Nil => false,
             _ => true
@@ -408,7 +408,7 @@ impl Interpreter {
         self.locals.insert(expr, depth);
     }
 
-    fn look_up_variable(&self, name: &Token, expr: Expr) -> Result<Option<Value>, ErrType> {
+    fn look_up_variable(&self, name: &Token, expr: Expr) -> Result<Option<Rc<Value>>, ErrType> {
         let distance = self.locals.get(&expr);
         if let Some(distance) = distance {
             Ok(Some(self.environment.borrow().get_at(*distance, name.text.clone())))
@@ -502,5 +502,5 @@ impl Value {
 
 pub enum ErrType {
     Err(Token, String),
-    Return(Value)
+    Return(Rc<Value>)
 }
