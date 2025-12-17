@@ -50,6 +50,8 @@ impl Scanner {
             '+' => { self.add_token(TokenType::Plus, None); }
             ';' => { self.add_token(TokenType::Semicolon, None); }
             '*' => { self.add_token(TokenType::Star, None); }
+            '?' => { self.add_token(TokenType::Question, None); }
+            ':' => { self.add_token(TokenType::Colon, None); }
 
             // equal
             '!' => {

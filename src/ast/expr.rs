@@ -12,6 +12,7 @@ pub enum Expr {
     Call(CallExpr),
     Get(GetExpr),
     Set(SetExpr),
+    Ternary(TernaryExpr),
     This(This),
     Super(Super)
 }
@@ -75,6 +76,13 @@ pub struct SetExpr {
     pub object: Box<Expr>,
     pub name: Token,
     pub value: Box<Expr>
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct TernaryExpr {
+    pub condition: Box<Expr>,
+    pub then_expr: Box<Expr>,
+    pub else_expr: Box<Expr>
 }
 
 #[derive(Clone, Eq, Hash, PartialEq)]

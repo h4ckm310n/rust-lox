@@ -25,6 +25,7 @@ pub enum TokenType {
     Equal, EqualEqual,
     Greater, GreaterEqual,
     Less, LessEqual,
+    Question, Colon,
     Identifier, String, Number,
     And, Or, True, False, If, Else, For, While,
     Print, Return, Super, This,

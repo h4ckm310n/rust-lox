@@ -77,6 +77,10 @@ pub trait Visitor {
         self.default_visit_assign_expr(assign_expr)
     }
 
+    fn visit_ternary_expr(&mut self, ternary_expr: &TernaryExpr) -> Result<Option<Self::R>, Self::E> {
+        self.default_visit_ternary_expr(ternary_expr)
+    }
+
     fn visit_call_expr(&mut self, call_expr: &CallExpr) -> Result<Option<Self::R>, Self::E> {
         self.default_visit_call_expr(call_expr)
     }
@@ -184,6 +188,7 @@ pub trait Visitor {
             Expr::Call(call_expr) => self.visit_call_expr(call_expr),
             Expr::Get(get_expr) => self.visit_get_expr(get_expr),
             Expr::Set(set_expr) => self.visit_set_expr(set_expr),
+            Expr::Ternary(ternary_expr) => self.visit_ternary_expr(ternary_expr),
             Expr::This(this) => self.visit_this(this),
             Expr::Super(super_expr) => self.visit_super(super_expr)
         }
@@ -219,6 +224,13 @@ pub trait Visitor {
 
     fn default_visit_assign_expr(&mut self, assign_expr: &AssignExpr) -> Result<Option<Self::R>, Self::E> {
         self.visit_expr(&*assign_expr.value)
+    }
+
+    fn default_visit_ternary_expr(&mut self, ternary_expr: &TernaryExpr) -> Result<Option<Self::R>, Self::E> {
+        self.visit_expr(&*ternary_expr.condition)?;
+        self.visit_expr(&*ternary_expr.then_expr)?;
+        self.visit_expr(&*ternary_expr.else_expr)?;
+        Ok(None)
     }
 
     fn default_visit_call_expr(&mut self, call_expr: &CallExpr) -> Result<Option<Self::R>, Self::E> {

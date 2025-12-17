@@ -37,11 +37,27 @@ impl Parser {
 // expr
 impl Parser {
     fn parse_expr(&self) -> Result<Expr, (Token, String)> {
-        self.parse_assignment()
+        self.parse_comma()
+    }
+
+    fn parse_comma(&self) -> Result<Expr, (Token, String)> {
+        let mut expr = self.parse_assignment()?;
+        while self.is_match(vec![TokenType::Comma]) {
+            let operator = self.previous();
+            let right = self.parse_assignment()?;
+            expr = Expr::Binary(
+                BinaryExpr {
+                    op: operator.clone(), 
+                    lhs: Box::new(expr), 
+                    rhs: Box::new(right) 
+                }
+            );
+        }
+        Ok(expr)
     }
 
     fn parse_assignment(&self) -> Result<Expr, (Token, String)> {
-        let expr = self.parse_logic_or()?;
+        let expr = self.parse_ternary()?;
         if self.is_match(vec![TokenType::Equal]) {
             let equals = self.previous();
             let value = self.parse_assignment()?;
@@ -66,6 +82,23 @@ impl Parser {
             return Err(self.handle_error(equals, "Invalid assignment target.".to_string()));
         }
         Ok(expr)
+    }
+
+    fn parse_ternary(&self) -> Result<Expr, (Token, String)> {
+        let condition = self.parse_logic_or()?;
+        if self.is_match(vec![TokenType::Question]) {
+            let then_expr = self.parse_expr()?;
+            if !self.is_match(vec![TokenType::Colon]) {
+                return Err(self.handle_error(self.previous(), "Expect ':' after then branch of conditional expression.".to_string()));
+            }
+            let else_expr = self.parse_ternary()?;
+            return Ok(Expr::Ternary(TernaryExpr {
+                condition: Box::new(condition),
+                then_expr: Box::new(then_expr),
+                else_expr: Box::new(else_expr)
+            }));
+        }
+        Ok(condition)
     }
 
     fn parse_logic_or(&self) -> Result<Expr, (Token, String)> {
@@ -595,7 +628,7 @@ impl Parser {
                 if arguments.len() >= 255 {
                     return Err(self.handle_error(self.peek(), "Can't have more than 255 arguments.".to_string()));
                 }
-                arguments.push(self.parse_expr()?);
+                arguments.push(self.parse_assignment()?);
                 if !self.is_match(vec![TokenType::Comma]) {
                     break;
                 }

@@ -116,6 +116,9 @@ impl Visitor for Interpreter {
             },
             TokenType::EqualEqual => {
                 return Ok(Some(Rc::new(Value::Bool(self.is_equal(lhs, rhs)))));
+            },
+            TokenType::Comma => {
+                return Ok(Some(rhs.clone()));
             }
 
             _ => {}
@@ -139,6 +142,15 @@ impl Visitor for Interpreter {
             return Err(ErrType::Err(token, message));
         };
         Ok(Some(value))
+    }
+
+    fn visit_ternary_expr(&mut self, ternary_expr: &TernaryExpr) -> Result<Option<Self::R>, Self::E> {
+        let condition = self.visit_expr(&*ternary_expr.condition)?.unwrap();
+        if self.is_truthy(condition) {
+            self.visit_expr(&*ternary_expr.then_expr)
+        } else {
+            self.visit_expr(&*ternary_expr.else_expr)
+        }
     }
 
     fn visit_logical_expr(&mut self, logical_expr: &LogicalExpr) -> Result<Option<Self::R>, Self::E> {
