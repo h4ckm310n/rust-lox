@@ -1,0 +1,5 @@
+var a = "a";
+var b = "a" + 1 + 2;
+var c = 3 + "c" + b;
+print b; // expect: a12
+print c; // expect: 3ca12

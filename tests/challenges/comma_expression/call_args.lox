@@ -1,0 +1,6 @@
+fun a(i, j) {
+    print i; // expect: 1
+    print j; // expect: 2
+}
+
+a(1, 2);
