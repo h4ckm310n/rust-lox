@@ -9,7 +9,8 @@ pub struct Parser {
     tokens: Vec<Token>,
     current: RefCell<usize>,
     pub had_error: RefCell<bool>,
-    errors: RefCell<Vec<(usize, usize, String)>>
+    errors: RefCell<Vec<(usize, usize, String)>>,
+    loop_depth: RefCell<usize>
 }
 
 impl Parser {
@@ -19,7 +20,8 @@ impl Parser {
             tokens: tokens, 
             current: RefCell::new(0),
             had_error: RefCell::new(false),
-            errors: RefCell::new(Vec::new())
+            errors: RefCell::new(Vec::new()),
+            loop_depth: RefCell::new(0)
         }
     }
 
@@ -307,6 +309,12 @@ impl Parser {
         if self.is_match(vec![TokenType::For]) {
             return self.parse_for_stmt();
         }
+        if self.is_match(vec![TokenType::Break]) {
+            return self.parse_break_stmt();
+        }
+        if self.is_match(vec![TokenType::Continue]) {
+            return self.parse_continue_stmt();
+        }
         if self.is_match(vec![TokenType::Return]) {
             return self.parse_return_stmt();
         }
@@ -355,13 +363,19 @@ impl Parser {
         self.consume(TokenType::LeftParen, "Expect '(' after 'while'.".to_string())?;
         let condition = self.parse_expr()?;
         self.consume(TokenType::RightParen, "Expect ')' after condition.".to_string())?;
-        let stmt = self.parse_stmt()?;
-        Ok(Stmt::While(
-            WhileStmt { 
-                condition: condition, 
-                stmt: Box::new(stmt)
-            }
-        ))
+        *self.loop_depth.borrow_mut() += 1;
+        let result = match self.parse_stmt() {
+            Ok(stmt) => Ok(Stmt::While(
+                WhileStmt { 
+                    condition: condition, 
+                    stmt: Box::new(stmt),
+                    for_update: None
+                }
+            )),
+            Err((token, message)) => Err((token, message)),
+        };
+        *self.loop_depth.borrow_mut() -= 1;
+        result
     }
 
     fn parse_for_stmt(&self) -> Result<Stmt, (Token, String)> {
@@ -383,22 +397,33 @@ impl Parser {
             update = Some(self.parse_expr()?);
         }
         self.consume(TokenType::RightParen, "Expect ')' after for clauses.".to_string())?;
-        let mut stmt = self.parse_stmt()?;
+        *self.loop_depth.borrow_mut() += 1;
+        let mut stmt = match self.parse_stmt() {
+            Ok(stmt) => stmt,
+            Err((token, message)) => {
+                *self.loop_depth.borrow_mut() -= 1;
+                return Err((token, message));
+            }
+        };
 
         // desugaring for
-        if let Some(update) = update {
+        let update_stmt = if let Some(update) = update {
             // add update expr after for body
+            let update_stmt = Stmt::Expr(
+                ExprStmt { expr: update }
+            );
             stmt = Stmt::Block(
                 Block { 
                     stmts: vec![
                         stmt, 
-                        Stmt::Expr(
-                            ExprStmt { expr: update }
-                        )
+                        update_stmt.clone()
                     ]
                 }
             );
-        }
+            Some(Box::new(update_stmt))
+        } else {
+            None
+        };
         if condition.is_none() {
             // change empty condition into true
             condition = Some(Expr::Literal(LiteralExpr { content: Literal::Bool(true) }));
@@ -407,7 +432,8 @@ impl Parser {
         stmt = Stmt::While(
             WhileStmt { 
                 condition: condition.unwrap(), 
-                stmt: Box::new(stmt) 
+                stmt: Box::new(stmt),
+                for_update: update_stmt
             }
         );
         // add init stmt before while
@@ -416,7 +442,24 @@ impl Parser {
                 Block { stmts: vec![init, stmt] }
             )
         }
+        *self.loop_depth.borrow_mut() -= 1;
         Ok(stmt)
+    }
+
+    fn parse_break_stmt(&self) -> Result<Stmt, (Token, String)> {
+        if *self.loop_depth.borrow() == 0 {
+            return Err(self.handle_error(self.previous(), "Must be inside a loop to use 'break'.".to_string()));
+        }
+        self.consume(TokenType::Semicolon, "Expect ';' after 'break'.".to_string())?;
+        Ok(Stmt::Break)
+    }
+
+    fn parse_continue_stmt(&self) -> Result<Stmt, (Token, String)> {
+        if *self.loop_depth.borrow() == 0 {
+            return Err(self.handle_error(self.previous(), "Must be inside a loop to use 'continue'.".to_string()));
+        }
+        self.consume(TokenType::Semicolon, "Expect ';' after 'continue'.".to_string())?;
+        Ok(Stmt::Continue)
     }
 
     fn parse_return_stmt(&self) -> Result<Stmt, (Token, String)> {

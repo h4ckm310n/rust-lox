@@ -6,6 +6,8 @@ pub enum Stmt {
     Print(PrintStmt),
     If(IfStmt),
     While(WhileStmt),
+    Break,
+    Continue,
     Return(ReturnStmt),
     Block(Block),
     VarDecl(VarDecl),
@@ -33,7 +35,8 @@ pub struct IfStmt {
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub struct WhileStmt {
     pub condition: Expr,
-    pub stmt: Box<Stmt>
+    pub stmt: Box<Stmt>,
+    pub for_update: Option<Box<Stmt>>
 }
 
 #[derive(Clone, Eq, Hash, PartialEq)]

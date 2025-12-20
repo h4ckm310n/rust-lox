@@ -25,6 +25,14 @@ pub trait Visitor {
         self.default_visit_while_stmt(while_stmt)
     }
 
+    fn visit_break_stmt(&mut self) -> Result<Option<Self::R>, Self::E> {
+        self.default_visit_break_stmt()
+    }
+
+    fn visit_continue_stmt(&mut self) -> Result<Option<Self::R>, Self::E> {
+        self.default_visit_continue_stmt()
+    }
+
     fn visit_return_stmt(&mut self, return_stmt: &ReturnStmt) -> Result<Option<Self::R>, Self::E> {
         self.default_visit_return_stmt(return_stmt)
     }
@@ -107,6 +115,8 @@ pub trait Visitor {
             Stmt::Print(print_stmt) => self.visit_print_stmt(print_stmt),
             Stmt::If(if_stmt) => self.visit_if_stmt(if_stmt),
             Stmt::While(while_stmt) => self.visit_while_stmt(while_stmt),
+            Stmt::Break => self.visit_break_stmt(),
+            Stmt::Continue => self.visit_continue_stmt(),
             Stmt::Return(return_stmt) => self.visit_return_stmt(return_stmt),
             Stmt::Block(block) => self.visit_block(block),
             Stmt::VarDecl(var_decl) => self.visit_var_decl(var_decl),
@@ -135,6 +145,14 @@ pub trait Visitor {
     fn default_visit_while_stmt(&mut self, while_stmt: &WhileStmt) -> Result<Option<Self::R>, Self::E> {
         self.visit_expr(&while_stmt.condition)?;
         self.visit_stmt(&*while_stmt.stmt)?;
+        Ok(None)
+    }
+
+    fn default_visit_break_stmt(&mut self) -> Result<Option<Self::R>, Self::E> {
+        Ok(None)
+    }
+
+    fn default_visit_continue_stmt(&mut self) -> Result<Option<Self::R>, Self::E> {
         Ok(None)
     }
 

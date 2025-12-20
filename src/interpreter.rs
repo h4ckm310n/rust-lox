@@ -322,9 +322,34 @@ impl Visitor for Interpreter {
 
     fn visit_while_stmt(&mut self, while_stmt: &WhileStmt) -> Result<Option<Self::R>, Self::E> {
         while let Some(condition) = self.visit_expr(&while_stmt.condition)? && self.is_truthy(condition) {
-            self.visit_stmt(&*while_stmt.stmt)?;
+            if let Err(error) = self.visit_stmt(&*while_stmt.stmt) {
+                match error {
+                    ErrType::Break => break,
+                    ErrType::Continue(environment) => {
+                        if let Some(update) = &while_stmt.for_update {
+                            let previous = self.environment.clone();
+                            self.environment = environment; // Enter the environment for update
+                            if let Err(error) = self.visit_stmt(&**update) {
+                                self.environment = previous;
+                                return Err(error);
+                            }
+                            self.environment = previous;
+                        }
+                        continue;
+                    },
+                    _ => return Err(error)
+                }
+            };
         }
         Ok(None)
+    }
+
+    fn visit_break_stmt(&mut self) -> Result<Option<Self::R>, Self::E> {
+        Err(ErrType::Break)
+    }
+
+    fn visit_continue_stmt(&mut self) -> Result<Option<Self::R>, Self::E> {
+        Err(ErrType::Continue(self.environment.clone()))
     }
 
     fn visit_return_stmt(&mut self, return_stmt: &ReturnStmt) -> Result<Option<Self::R>, Self::E> {
@@ -401,15 +426,19 @@ impl Interpreter {
 
     pub fn execute_block(&mut self, stmts: &Vec<Stmt>, environment: Rc<RefCell<Environment>>) -> Result<(), ErrType> {
         let previous = self.environment.clone();
-        self.environment = environment;
+        self.environment = environment.clone();
         for stmt in stmts {
             let result = self.visit_stmt(stmt);
-            if let Err(ErrType::Err(token, message)) = result {
+            if let Err(error) = result {
                 self.environment = previous;
-                return Err(ErrType::Err(token, message));
-            } else if let Err(ErrType::Return(value)) = result {
-                self.environment = previous;
-                return Err(ErrType::Return(value));
+                match error {
+                    ErrType::Continue(_) => {
+                        return Err(ErrType::Continue(environment));
+                    }
+                    _ => {
+                        return Err(error);
+                    }
+                }
             }
         }
         self.environment = previous;
@@ -514,5 +543,7 @@ impl Value {
 
 pub enum ErrType {
     Err(Token, String),
-    Return(Rc<Value>)
+    Return(Rc<Value>),
+    Break,
+    Continue(Rc<RefCell<Environment>>)
 }

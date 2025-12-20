@@ -1,9 +1,10 @@
-pub const KEYWORDS: [(&str, TokenType); 16] = [
+pub const KEYWORDS: [(&str, TokenType); 18] = [
    ("and", TokenType::And), ("or", TokenType::Or),
    ("true", TokenType::True), ("false", TokenType::False),
    ("if", TokenType::If), ("else", TokenType::Else), ("for", TokenType::For), ("while", TokenType::While),
    ("print", TokenType::Print), ("return", TokenType::Return), ("super", TokenType::Super), ("this", TokenType::This),
-   ("var", TokenType::Var), ("class", TokenType::Class), ("fun", TokenType::Fun), ("nil", TokenType::Nil)
+   ("var", TokenType::Var), ("class", TokenType::Class), ("fun", TokenType::Fun), ("nil", TokenType::Nil),
+   ("break", TokenType::Break), ("continue", TokenType::Continue)
 ];
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -27,7 +28,7 @@ pub enum TokenType {
     Less, LessEqual,
     Question, Colon,
     Identifier, String, Number,
-    And, Or, True, False, If, Else, For, While,
+    And, Or, True, False, If, Else, For, While, Break, Continue,
     Print, Return, Super, This,
     Var, Class, Fun, Nil,
     Eof
