@@ -8,6 +8,7 @@ use crate::visit::*;
 use crate::ast::{expr::*, stmt::*};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt;
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -35,7 +36,7 @@ impl Visitor for Interpreter {
         match unary_expr.op.token_type {
             TokenType::Minus => {
                 self.check_number_operand(&unary_expr.op, &value)?;
-                return Ok(Some(Rc::new(Value::Number(-value.to_number().unwrap()))));
+                return Ok(Some(Rc::new(Value::Number(-value.as_number().unwrap()))));
             },
             TokenType::Bang => {
                 return Ok(Some(Rc::new(Value::Bool(!self.is_truthy(value)))));
@@ -56,33 +57,33 @@ impl Visitor for Interpreter {
         match binary_expr.op.token_type {
             TokenType::Minus => {
                 self.check_number_operands(&binary_expr.op, lhs, rhs)?;
-                let result = lhs.to_number().unwrap() - rhs.to_number().unwrap();
+                let result = lhs.as_number().unwrap() - rhs.as_number().unwrap();
                 return Ok(Some(Rc::new(Value::Number(result))));
             },
             TokenType::Slash => {
                 self.check_number_operands(&binary_expr.op, lhs, rhs)?;
-                if rhs.to_number().unwrap() == 0.0 {
+                if rhs.as_number().unwrap() == 0.0 {
                     return Err(ErrType::Err(binary_expr.op.clone(), "Cannot divide by 0.".to_string()));
                 }
-                let result = lhs.to_number().unwrap() / rhs.to_number().unwrap();
+                let result = lhs.as_number().unwrap() / rhs.as_number().unwrap();
                 return Ok(Some(Rc::new(Value::Number(result))));
             },
             TokenType::Star => {
                 self.check_number_operands(&binary_expr.op, lhs, rhs)?;
-                let result = lhs.to_number().unwrap() * rhs.to_number().unwrap();
+                let result = lhs.as_number().unwrap() * rhs.as_number().unwrap();
                 return Ok(Some(Rc::new(Value::Number(result))));
             },
             TokenType::Plus => {
-                if let (Some(lhs), Some(rhs)) = (lhs.to_number(), rhs.to_number()) {
+                if let (Some(lhs), Some(rhs)) = (lhs.as_number(), rhs.as_number()) {
                     let result = lhs + rhs;
                     return Ok(Some(Rc::new(Value::Number(result))));
-                } else if let (Some(lhs), Some(rhs)) = (lhs.to_string(), rhs.to_string()) {
+                } else if let (Some(lhs), Some(rhs)) = (lhs.as_string(), rhs.as_string()) {
                     let result = lhs + &rhs;
                     return Ok(Some(Rc::new(Value::String(result))));
-                } else if let (Some(lhs), Some(rhs)) = (lhs.to_number(), rhs.to_string()) {
+                } else if let (Some(lhs), Some(rhs)) = (lhs.as_number(), rhs.as_string()) {
                     let result = lhs.to_string() + &rhs;
                     return Ok(Some(Rc::new(Value::String(result))));
-                } else if let (Some(lhs), Some(rhs)) = (lhs.to_string(), rhs.to_number()) {
+                } else if let (Some(lhs), Some(rhs)) = (lhs.as_string(), rhs.as_number()) {
                     let result = lhs + &rhs.to_string();
                     return Ok(Some(Rc::new(Value::String(result))));
                 } else {
@@ -92,22 +93,22 @@ impl Visitor for Interpreter {
 
             TokenType::Greater => {
                 self.check_number_operands(&binary_expr.op, lhs, rhs)?;
-                let result = lhs.to_number().unwrap() > rhs.to_number().unwrap();
+                let result = lhs.as_number().unwrap() > rhs.as_number().unwrap();
                 return Ok(Some(Rc::new(Value::Bool(result))));
             },
             TokenType::GreaterEqual => {
                 self.check_number_operands(&binary_expr.op, lhs, rhs)?;
-                let result = lhs.to_number().unwrap() >= rhs.to_number().unwrap();
+                let result = lhs.as_number().unwrap() >= rhs.as_number().unwrap();
                 return Ok(Some(Rc::new(Value::Bool(result))));
             },
             TokenType::Less => {
                 self.check_number_operands(&binary_expr.op, lhs, rhs)?;
-                let result = lhs.to_number().unwrap() < rhs.to_number().unwrap();
+                let result = lhs.as_number().unwrap() < rhs.as_number().unwrap();
                 return Ok(Some(Rc::new(Value::Bool(result))));
             },
             TokenType::LessEqual => {
                 self.check_number_operands(&binary_expr.op, lhs, rhs)?;
-                let result = lhs.to_number().unwrap() <= rhs.to_number().unwrap();
+                let result = lhs.as_number().unwrap() <= rhs.as_number().unwrap();
                 return Ok(Some(Rc::new(Value::Bool(result))));
             },
 
@@ -174,7 +175,7 @@ impl Visitor for Interpreter {
             return Ok(Some(Rc::new(Value::Number(SystemTime::now().duration_since(UNIX_EPOCH).expect("").as_secs_f64()))));
         }
         let callee = self.visit_expr(&call_expr.name)?;
-        let callable = if callee.is_some() && let Some(callable) = callee.unwrap().to_callable() {
+        let callable = if callee.is_some() && let Some(callable) = callee.unwrap().as_callable() {
             callable
         } else {
             return Err(ErrType::Err(call_expr.paren.clone(), "Can only call functions and classes.".to_string()));
@@ -201,7 +202,7 @@ impl Visitor for Interpreter {
 
     fn visit_set_expr(&mut self, set_expr: &SetExpr) -> Result<Option<Self::R>, Self::E> {
         let object = self.visit_expr(&set_expr.object)?;
-        if object.is_some() && let Some(instance) = object.unwrap().to_instance() {
+        if object.is_some() && let Some(instance) = object.unwrap().as_instance() {
             let value = self.visit_expr(&set_expr.value)?;
             if let Some(value) = value.as_ref() {
                 instance.borrow_mut().set(&set_expr.name, value.to_owned());
@@ -364,7 +365,7 @@ impl Visitor for Interpreter {
     fn visit_print_stmt(&mut self, print_stmt: &PrintStmt) -> Result<Option<Self::R>, Self::E> {
         let value = self.visit_expr(&print_stmt.expr)?;
         if let Some(value) = value {
-            println!("{}", value.stringify());
+            println!("{value}");
         } else {
             println!("nil");
         }
@@ -488,7 +489,7 @@ impl Value {
         }
     }
 
-    fn to_bool(&self) -> Option<bool> {
+    fn as_bool(&self) -> Option<bool> {
         if let Self::Bool(value) = self {
             Some(value.clone())
         } else {
@@ -496,7 +497,7 @@ impl Value {
         }
     }
 
-    fn to_string(&self) -> Option<String> {
+    fn as_string(&self) -> Option<String> {
         if let Self::String(value) = self {
             Some(value.clone())
         } else {
@@ -504,7 +505,7 @@ impl Value {
         }
     }
 
-    fn to_number(&self) -> Option<f64> {
+    fn as_number(&self) -> Option<f64> {
         if let Self::Number(value) = self {
             Some(value.clone())
         } else {
@@ -512,7 +513,7 @@ impl Value {
         }
     }
 
-    fn to_instance(&self) -> Option<Rc<RefCell<Instance>>> {
+    fn as_instance(&self) -> Option<Rc<RefCell<Instance>>> {
         if let Self::Instance(instance) = self {
             Some(instance.clone())
         } else {
@@ -520,23 +521,25 @@ impl Value {
         }
     }
 
-    fn to_callable(&self) -> Option<Rc<RefCell<dyn Callable>>> {
+    fn as_callable(&self) -> Option<Rc<RefCell<dyn Callable>>> {
         match self {
             Self::Function(function) => Some(Rc::clone(function) as Rc<RefCell<dyn Callable>>),
             Self::Class(class) => Some(Rc::clone(class) as Rc<RefCell<dyn Callable>>),
             _ => None
         }
     }
+}
 
-    fn stringify(&self) -> String {
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
-            Self::Bool(value) => value.to_string(),
-            Self::String(value) => value.clone(),
-            Self::Number(value) => value.to_string(),
-            Self::Function(fun) => fun.borrow().to_string(),
-            Self::Class(class) => class.borrow().to_string(),
-            Self::Instance(instance) => instance.borrow().to_string(),
-            Self::Nil => "nil".to_string()
+            Self::Bool(value) => write!(f, "{value}"),
+            Self::String(value) => write!(f, "{value}"),
+            Self::Number(value) => write!(f, "{value}"),
+            Self::Function(fun) => write!(f, "{}", fun.borrow().to_string()),
+            Self::Class(class) => write!(f, "{}", class.borrow().to_string()),
+            Self::Instance(instance) => write!(f, "{}", instance.borrow().to_string()),
+            Self::Nil => write!(f, "nil")
         }
     }
 }
