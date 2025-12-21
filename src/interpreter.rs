@@ -3,6 +3,7 @@ use crate::environment::Environment;
 use crate::function::Function;
 use crate::callable::Callable;
 use crate::instance::Instance;
+use crate::native::NativeFunction;
 use crate::token::{Literal, Token, TokenType};
 use crate::visit::*;
 use crate::ast::{expr::*, stmt::*};
@@ -10,7 +11,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct Interpreter {
     pub globals: Rc<RefCell<Environment>>,
@@ -171,9 +171,6 @@ impl Visitor for Interpreter {
     }
 
     fn visit_call_expr(&mut self, call_expr: &CallExpr) -> Result<Option<Self::R>, Self::E> {
-        if let Expr::Identifier(identifier) = &*call_expr.name && identifier.name.text == "clock" {
-            return Ok(Some(Rc::new(Value::Number(SystemTime::now().duration_since(UNIX_EPOCH).expect("").as_secs_f64()))));
-        }
         let callee = self.visit_expr(&call_expr.name)?;
         let callable = if callee.is_some() && let Some(callable) = callee.unwrap().as_callable() {
             callable
@@ -213,9 +210,6 @@ impl Visitor for Interpreter {
     }
 
     fn visit_identifier(&mut self, identifier: &Identifier) -> Result<Option<Self::R>, Self::E> {
-        if identifier.name.text == "clock" {
-            return Ok(Some(Rc::new(Value::String("<native fn>".to_string()))));
-        }
         Ok(self.look_up_variable(&identifier.name, Expr::Identifier(identifier.to_owned()))?)
     }
 
@@ -384,6 +378,9 @@ impl Interpreter {
     }
 
     pub fn interpret(&mut self, stmts: &Vec<Stmt>) {
+        self.globals.borrow_mut().define("clock".to_string(), Rc::new(
+            Value::NativeFunction(Rc::new(RefCell::new(NativeFunction::new("clock".to_string()))))
+        ));
         for stmt in stmts {
             if let Err(ErrType::Err(token, message)) = self.visit_stmt(stmt) {
                 println!("Runtime error: {} {} {}", token.start, token.end, message);
@@ -474,6 +471,7 @@ pub enum Value {
     String(String),
     Number(f64),
     Function(Rc<RefCell<Function>>),
+    NativeFunction(Rc<RefCell<NativeFunction>>),
     Class(Rc<RefCell<Class>>),
     Instance(Rc<RefCell<Instance>>),
     Nil
@@ -524,6 +522,7 @@ impl Value {
     fn as_callable(&self) -> Option<Rc<RefCell<dyn Callable>>> {
         match self {
             Self::Function(function) => Some(Rc::clone(function) as Rc<RefCell<dyn Callable>>),
+            Self::NativeFunction(native_function) => Some(Rc::clone(native_function) as Rc<RefCell<dyn Callable>>),
             Self::Class(class) => Some(Rc::clone(class) as Rc<RefCell<dyn Callable>>),
             _ => None
         }
@@ -537,6 +536,7 @@ impl fmt::Display for Value {
             Self::String(value) => write!(f, "{value}"),
             Self::Number(value) => write!(f, "{value}"),
             Self::Function(fun) => write!(f, "{}", fun.borrow().to_string()),
+            Self::NativeFunction(_) => write!(f, "<native fn>"),
             Self::Class(class) => write!(f, "{}", class.borrow().to_string()),
             Self::Instance(instance) => write!(f, "{}", instance.borrow().to_string()),
             Self::Nil => write!(f, "nil")
