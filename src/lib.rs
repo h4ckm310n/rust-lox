@@ -13,3 +13,4 @@ pub mod function;
 pub mod class;
 pub mod instance;
 pub mod native;
+pub mod array;

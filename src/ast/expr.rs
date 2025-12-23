@@ -14,7 +14,10 @@ pub enum Expr {
     Set(SetExpr),
     Ternary(TernaryExpr),
     This(This),
-    Super(Super)
+    Super(Super),
+    Array(ArrayExpr),
+    SubscriptGet(SubscriptGetExpr),
+    SubscriptSet(SubscriptSetExpr)
 }
 
 #[derive(Clone, Eq, Hash, PartialEq)]
@@ -94,4 +97,24 @@ pub struct This {
 pub struct Super {
     pub keyword: Token,
     pub method: Token
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct ArrayExpr {
+    pub elements: Vec<Expr>
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct SubscriptGetExpr {
+    pub array: Box<Expr>,
+    pub index: Box<Expr>,
+    pub bracket: Token
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct SubscriptSetExpr {
+    pub array: Box<Expr>,
+    pub index: Box<Expr>,
+    pub value: Box<Expr>,
+    pub bracket: Token
 }

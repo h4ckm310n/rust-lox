@@ -109,6 +109,18 @@ pub trait Visitor {
         self.default_visit_super(super_expr)
     }
 
+    fn visit_array_expr(&mut self, array_expr: &ArrayExpr) -> Result<Option<Self::R>, Self::E> {
+        self.default_visit_array_expr(array_expr)
+    }
+
+    fn visit_subscript_get_expr(&mut self, subscript_get_expr: &SubscriptGetExpr) -> Result<Option<Self::R>, Self::E> {
+        self.default_visit_subscript_get_expr(subscript_get_expr)
+    }
+
+    fn visit_subscript_set_expr(&mut self, subscript_set_expr: &SubscriptSetExpr) -> Result<Option<Self::R>, Self::E> {
+        self.default_visit_subscript_set_expr(subscript_set_expr)
+    }
+
     fn default_visit_stmt(&mut self, stmt: &Stmt) -> Result<Option<Self::R>, Self::E> {
         match stmt {
             Stmt::Expr(expr_stmt) => self.visit_expr_stmt(expr_stmt),
@@ -208,7 +220,10 @@ pub trait Visitor {
             Expr::Set(set_expr) => self.visit_set_expr(set_expr),
             Expr::Ternary(ternary_expr) => self.visit_ternary_expr(ternary_expr),
             Expr::This(this) => self.visit_this(this),
-            Expr::Super(super_expr) => self.visit_super(super_expr)
+            Expr::Super(super_expr) => self.visit_super(super_expr),
+            Expr::Array(array_expr) => self.visit_array_expr(array_expr),
+            Expr::SubscriptGet(subscript_get_expr) => self.visit_subscript_get_expr(subscript_get_expr),
+            Expr::SubscriptSet(subscript_set_expr) => self.visit_subscript_set_expr(subscript_set_expr)
         }
     }
 
@@ -274,6 +289,26 @@ pub trait Visitor {
     }
 
     fn default_visit_super(&mut self, _super_expr: &Super) -> Result<Option<Self::R>, Self::E> {
+        Ok(None)
+    }
+
+    fn default_visit_array_expr(&mut self, array_expr: &ArrayExpr) -> Result<Option<Self::R>, Self::E> {
+        for element in &array_expr.elements {
+            self.visit_expr(element)?;
+        }
+        Ok(None)
+    }
+
+    fn default_visit_subscript_get_expr(&mut self, subscript_get_expr: &SubscriptGetExpr) -> Result<Option<Self::R>, Self::E> {
+        self.visit_expr(&*subscript_get_expr.array)?;
+        self.visit_expr(&*subscript_get_expr.index)?;
+        Ok(None)
+    }
+
+    fn default_visit_subscript_set_expr(&mut self, subscript_set_expr: &SubscriptSetExpr) -> Result<Option<Self::R>, Self::E> {
+        self.visit_expr(&*subscript_set_expr.array)?;
+        self.visit_expr(&*subscript_set_expr.index)?;
+        self.visit_expr(&*subscript_set_expr.value)?;
         Ok(None)
     }
 }

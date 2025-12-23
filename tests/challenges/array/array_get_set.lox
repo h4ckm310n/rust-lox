@@ -1,0 +1,4 @@
+var a = [1, 2, 3, 4, 5];
+print a[2]; // Expect: 3
+a[-3] = 0;
+print a[2]; // Expect: 0

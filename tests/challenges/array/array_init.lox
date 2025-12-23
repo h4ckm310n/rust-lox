@@ -1,0 +1,4 @@
+var a = [];
+var b = [1, 2, "abc", true];
+print a; // Expect: []
+print b; // Expect: [1, 2, abc, true]

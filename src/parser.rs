@@ -81,6 +81,16 @@ impl Parser {
                     }
                 ));
             }
+            else if let Expr::SubscriptGet(subscript_get_expr) = expr {
+                return Ok(Expr::SubscriptSet(
+                    SubscriptSetExpr {
+                        array: subscript_get_expr.array,
+                        index: subscript_get_expr.index,
+                        value: Box::new(value),
+                        bracket: subscript_get_expr.bracket
+                    }
+                ))
+            }
             return Err(self.handle_error(equals, "Invalid assignment target.".to_string()));
         }
         Ok(expr)
@@ -226,6 +236,16 @@ impl Parser {
                         name: name.clone() 
                     }
                 )
+            } else if self.is_match(vec![TokenType::LeftSuqareBracket]) {
+                let index = self.parse_expr()?;
+                let bracket = self.consume(TokenType::RightSquareBracket, "Expect ']' after index.".to_string())?;
+                expr = Expr::SubscriptGet(
+                    SubscriptGetExpr {
+                        array: Box::new(expr),
+                        index: Box::new(index),
+                        bracket: bracket.clone()
+                    }
+                );
             } else {
                 break;
             }
@@ -286,6 +306,19 @@ impl Parser {
             return Ok(Expr::Grouping(
                 GroupingExpr { expr: Box::new(expr) }
             ));
+        }
+        if self.is_match(vec![TokenType::LeftSuqareBracket]) {
+            let mut elements = Vec::new();
+            if !self.check(TokenType::RightSquareBracket) {
+                loop {
+                    elements.push(self.parse_assignment()?);
+                    if !self.is_match(vec![TokenType::Comma]) {
+                        break;
+                    }
+                }
+            }
+            self.consume(TokenType::RightSquareBracket, "Expect ']' after array elements.".to_string())?;
+            return Ok(Expr::Array(ArrayExpr { elements: elements }));
         }
         Err(self.handle_error(self.peek(), "Expect expression.".to_string()))
     } 

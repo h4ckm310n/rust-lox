@@ -1,3 +1,4 @@
+use crate::array::Array;
 use crate::class::Class;
 use crate::environment::Environment;
 use crate::function::Function;
@@ -189,10 +190,14 @@ impl Visitor for Interpreter {
 
     fn visit_get_expr(&mut self, get_expr: &GetExpr) -> Result<Option<Self::R>, Self::E> {
         let object = self.visit_expr(&get_expr.object)?;
-        if object.is_some() && let Value::Instance(instance) = &*object.unwrap() {
-            let binding = instance.borrow();
-            let field = binding.get(&get_expr.name)?;
-            return Ok(Some(field));
+        if let Some(object) = object {
+            if let Value::Instance(instance) = &*object {
+                let binding = instance.borrow();
+                let field = binding.get(&get_expr.name)?;
+                return Ok(Some(field));
+            } else if let Value::Array(array) = &*object {
+                // TODO: handle array methods
+            }
         }
         Err(ErrType::Err(get_expr.name.clone(), "Only instances have properties.".to_string()))
     }
@@ -232,6 +237,48 @@ impl Visitor for Interpreter {
 
         // unreachable
         Ok(None)
+    }
+
+    fn visit_array_expr(&mut self, array_expr: &ArrayExpr) -> Result<Option<Self::R>, Self::E> {
+        let mut elements = Vec::new();
+        for element in &array_expr.elements {
+            elements.push(self.visit_expr(element)?.unwrap());
+        }
+        Ok(Some(Rc::new(Value::Array(Rc::new(RefCell::new(Array::new(elements)))))))
+    }
+
+    fn visit_subscript_get_expr(&mut self, subscript_get_expr: &SubscriptGetExpr) -> Result<Option<Self::R>, Self::E> {
+        let value = self.visit_expr(&*subscript_get_expr.array)?;
+        if let Some(value) = value && let Some(array) = value.as_array() {
+            let value = self.visit_expr(&*subscript_get_expr.index)?;
+            if let Some(value) = value &&
+               let Some(index) = value.as_number() && index.fract() == 0.0 {
+                let element = array.borrow().get(index as isize);
+                if let Some(element) = element {
+                    return Ok(Some(element))
+                }
+                return Err(ErrType::Err(subscript_get_expr.bracket.clone(), "Index out of range.".to_string()));
+            }
+            return Err(ErrType::Err(subscript_get_expr.bracket.clone(), "Index must be an integer.".to_string()));
+        }
+        Err(ErrType::Err(subscript_get_expr.bracket.clone(), "Only arrays can be indexed.".to_string()))
+    }
+
+    fn visit_subscript_set_expr(&mut self, subscript_set_expr: &SubscriptSetExpr) -> Result<Option<Self::R>, Self::E> {
+        let value = self.visit_expr(&*subscript_set_expr.array)?;
+        if let Some(value) = value && let Some(array) = value.as_array() {
+            let value = self.visit_expr(&*subscript_set_expr.index)?;
+            if let Some(value) = value &&
+               let Some(index) = value.as_number() && index.fract() == 0.0 {
+                let value = self.visit_expr(&*subscript_set_expr.value)?.unwrap();
+                if array.borrow_mut().set(index as isize, value.clone()) {
+                    return Ok(Some(value));
+                }
+                return Err(ErrType::Err(subscript_set_expr.bracket.clone(), "Index out of range.".to_string()));
+            }
+            return Err(ErrType::Err(subscript_set_expr.bracket.clone(), "Index must be an integer.".to_string()));
+        }
+        Err(ErrType::Err(subscript_set_expr.bracket.clone(), "Only arrays can be indexed.".to_string()))
     }
 
     fn visit_var_decl(&mut self, var_decl: &VarDecl) -> Result<Option<Self::R>, Self::E> {
@@ -474,6 +521,7 @@ pub enum Value {
     NativeFunction(Rc<RefCell<NativeFunction>>),
     Class(Rc<RefCell<Class>>),
     Instance(Rc<RefCell<Instance>>),
+    Array(Rc<RefCell<Array>>),
     Nil
 }
 
@@ -527,6 +575,14 @@ impl Value {
             _ => None
         }
     }
+
+    fn as_array(&self) -> Option<Rc<RefCell<Array>>> {
+        if let Self::Array(array) = self {
+            Some(array.clone())
+        } else {
+            None
+        }
+    }
 }
 
 impl fmt::Display for Value {
@@ -539,6 +595,7 @@ impl fmt::Display for Value {
             Self::NativeFunction(_) => write!(f, "<native fn>"),
             Self::Class(class) => write!(f, "{}", class.borrow().to_string()),
             Self::Instance(instance) => write!(f, "{}", instance.borrow().to_string()),
+            Self::Array(array) => write!(f, "{}", array.borrow().to_string()),
             Self::Nil => write!(f, "nil")
         }
     }
