@@ -1,0 +1,8 @@
+var a = [];
+print len(a); // Expect: 0
+push_array(a, 1);
+print len(a); // Expect: 1
+push_array(a, nil);
+push_array(a, "abcd");
+print len(pop_array(a)); // Expect: 4
+print len(a); // Expect: 2

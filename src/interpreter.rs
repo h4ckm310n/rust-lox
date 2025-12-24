@@ -4,7 +4,7 @@ use crate::environment::Environment;
 use crate::function::Function;
 use crate::callable::Callable;
 use crate::instance::Instance;
-use crate::native::NativeFunction;
+use crate::native::{init_native_functions, NativeFunction};
 use crate::token::{Literal, Token, TokenType};
 use crate::visit::*;
 use crate::ast::{expr::*, stmt::*};
@@ -195,8 +195,6 @@ impl Visitor for Interpreter {
                 let binding = instance.borrow();
                 let field = binding.get(&get_expr.name)?;
                 return Ok(Some(field));
-            } else if let Value::Array(array) = &*object {
-                // TODO: handle array methods
             }
         }
         Err(ErrType::Err(get_expr.name.clone(), "Only instances have properties.".to_string()))
@@ -425,9 +423,7 @@ impl Interpreter {
     }
 
     pub fn interpret(&mut self, stmts: &Vec<Stmt>) {
-        self.globals.borrow_mut().define("clock".to_string(), Rc::new(
-            Value::NativeFunction(Rc::new(RefCell::new(NativeFunction::new("clock".to_string()))))
-        ));
+        init_native_functions(self.globals.clone());
         for stmt in stmts {
             if let Err(ErrType::Err(token, message)) = self.visit_stmt(stmt) {
                 println!("Runtime error: {} {} {}", token.start, token.end, message);
@@ -518,7 +514,7 @@ pub enum Value {
     String(String),
     Number(f64),
     Function(Rc<RefCell<Function>>),
-    NativeFunction(Rc<RefCell<NativeFunction>>),
+    NativeFunction(Rc<RefCell<dyn NativeFunction>>),
     Class(Rc<RefCell<Class>>),
     Instance(Rc<RefCell<Instance>>),
     Array(Rc<RefCell<Array>>),

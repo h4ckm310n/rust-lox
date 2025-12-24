@@ -1,31 +1,29 @@
 use crate::callable::Callable;
-use crate::interpreter::{Interpreter, Value};
+use crate::environment::Environment;
+use crate::interpreter::Value;
+use crate::native::array::{ArrayPop, ArrayPush};
+use crate::native::clock::Clock;
+use crate::native::len::Len;
+use std::cell::RefCell;
 use std::rc::Rc;
 mod clock;
+mod array;
+mod len;
 
-#[derive(PartialEq)]
-pub struct NativeFunction {
-    pub name: String
+pub trait NativeFunction: Callable {
+    fn get_name(&self) -> String;
 }
 
-impl NativeFunction {
-    pub fn new(name: String) -> Self {
-        Self { name: name }
+impl PartialEq for dyn NativeFunction {
+    fn eq(&self, other: &Self) -> bool {
+        self.get_name() == other.get_name()
     }
 }
 
-impl Callable for NativeFunction {
-    fn call(&self, _interpreter: &mut Interpreter, _arguments: Vec<Rc<Value>>) -> Rc<Value> {
-        match &self.name as &str {
-            "clock" => clock::clock(),
-            _ => Rc::new(Value::Nil)
-        }
-    }
-
-    fn arity(&self) -> usize {
-        match &self.name as &str {
-            "clock" => 0,
-            _ => 0
-        }
-    }
+pub fn init_native_functions(environment: Rc<RefCell<Environment>>) {
+    let mut environment = environment.borrow_mut();
+    environment.define("clock".to_string(), Rc::new(Value::NativeFunction(Rc::new(RefCell::new(Clock{})))));
+    environment.define("push_array".to_string(), Rc::new(Value::NativeFunction(Rc::new(RefCell::new(ArrayPush{})))));
+    environment.define("pop_array".to_string(), Rc::new(Value::NativeFunction(Rc::new(RefCell::new(ArrayPop{})))));
+    environment.define("len".to_string(), Rc::new(Value::NativeFunction(Rc::new(RefCell::new(Len{})))));
 }
